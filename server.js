@@ -64,7 +64,14 @@ app.use((err, req, res, next) => {
 
 
 
-app.listen(process.env.PORT , () => {
-  console.log(`✅ Server is running on ${process.env.PORT}`);
-});
-dbConnection();
+// ✅ Connect DB first, then start server
+dbConnection()
+  .then(() => {
+    const PORT = process.env.PORT || 9000;
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`✅ Server is running on http://0.0.0.0:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("❌ Database connection failed:", err);
+  });
