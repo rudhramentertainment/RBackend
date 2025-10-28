@@ -16,6 +16,7 @@ import invoiceRoute from './Routes/invoiceRoutes.js';
 import receiptRoutes from './Routes/receiptRoutes.js';
 import cookieParser from "cookie-parser";
 import cors from 'cors';
+import mongoose from 'mongoose';
 
 let app = express();
 
@@ -62,7 +63,20 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(process.env.PORT , () => {
-  console.log(`✅ Server is running on ${process.env.PORT}`);
-});
-dbConnection();
+const startServer = async () => {
+  try {
+    console.log("⏳ Connecting to MongoDB...");
+    await mongoose.connect(process.env.MONGO_URI);
+    console.log("✅ Database connected successfully");
+
+    const PORT = process.env.PORT || 9000;
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`🚀 Server is running on http://0.0.0.0:${PORT}`);
+    });
+  } catch (error) {
+    console.error("❌ Error connecting to MongoDB:", error.message);
+    process.exit(1);
+  }
+};
+
+startServer();
