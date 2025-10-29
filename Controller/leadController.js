@@ -126,11 +126,11 @@ export const getLeadById = async (req, res) => {
   }
 };
 
-// 🔴 Delete Lead
 export const deleteLead = async (req, res) => {
   try {
     const { id } = req.params;
 
+    // Step 1: Find and delete the Lead
     const deletedLead = await Lead.findByIdAndDelete(id);
 
     if (!deletedLead) {
@@ -140,16 +140,23 @@ export const deleteLead = async (req, res) => {
       });
     }
 
+    // Step 2: Delete related Client(s) where leadId matches
+    const deletedClients = await Client.deleteMany({ leadId: id });
+
+    // Step 3: Return response
     res.status(200).json({
       success: true,
-      message: "Lead deleted successfully.",
-      data: deletedLead,
+      message: `Lead deleted successfully. ${deletedClients.deletedCount} related client(s) also removed.`,
+      data: {
+        lead: deletedLead,
+        deletedClientsCount: deletedClients.deletedCount,
+      },
     });
   } catch (error) {
-    console.error("Error deleting lead:", error);
+    console.error("Error deleting lead and related clients:", error);
     res.status(500).json({
       success: false,
-      message: "Server error while deleting lead.",
+      message: "Server error while deleting lead and related clients.",
       error: error.message,
     });
   }

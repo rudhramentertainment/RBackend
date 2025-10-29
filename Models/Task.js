@@ -6,8 +6,20 @@ const TaskSchema = new mongoose.Schema(
     description: String,
     client: { type: mongoose.Schema.Types.ObjectId, ref: "Client" },
     subCompany: { type: mongoose.Schema.Types.ObjectId, ref: "SubCompany" },
+    
+    // Store multiple services with their offerings
+    chosenServices: [
+      {
+        serviceId: { type: mongoose.Schema.Types.ObjectId },
+        title: { type: String, required: true },
+        subCompanyId: { type: mongoose.Schema.Types.ObjectId, ref: "SubCompany" },
+        subCompanyName: String,
+        selectedOfferings: [String],
+        _id: false
+      }
+    ],
 
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // admin/superadmin
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     assignedTo: [
       { type: mongoose.Schema.Types.ObjectId, ref: "User" }
     ],
@@ -42,12 +54,10 @@ const TaskSchema = new mongoose.Schema(
         extra: Object,
       },
     ],
-    // models/Task.js
-deadlineNotified: { type: Boolean, default: false },
-assignedNotified: { type: Boolean, default: false },
-
+    
+    deadlineNotified: { type: Boolean, default: false },
+    assignedNotified: { type: Boolean, default: false },
   },
-  
   { timestamps: true }
 );
 

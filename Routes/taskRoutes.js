@@ -14,7 +14,7 @@ import { authenticate } from "../Middleware/authentication.js";
 const router = express.Router();
 
 router.post("/addtask",  addTask);
-router.get("/gettask",authenticate, getAllTasks);
+router.get("/gettask", getAllTasks);
 router.get("/mytasks",authenticate, getMyTasks);
 router.get("/:id", getTaskById);
 router.put("/:id",  updateTask);
