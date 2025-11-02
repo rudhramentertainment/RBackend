@@ -1,0 +1,30 @@
+[33m431b861[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m HEAD@{Sat Nov 1 15:49:10 2025}: reset: moving to origin/main
+[33m8549df8[m[33m ([m[1;32mbackup-before-secret-clean[m[33m)[m HEAD@{Sat Nov 1 15:40:20 2025}: pull --rebase origin main (finish): returning to refs/heads/main
+[33m8549df8[m[33m ([m[1;32mbackup-before-secret-clean[m[33m)[m HEAD@{Sat Nov 1 15:40:20 2025}: pull --rebase origin main (pick): shobhit commit
+[33m9aa9955[m HEAD@{Sat Nov 1 15:40:19 2025}: pull --rebase origin main (pick): fenew2 commit
+[33mb266a1f[m HEAD@{Sat Nov 1 15:40:19 2025}: pull --rebase origin main (pick): f commit
+[33m7fd1d9b[m HEAD@{Sat Nov 1 15:40:19 2025}: pull --rebase origin main (pick): chore: remove service account file and ignore it
+[33m1192d89[m HEAD@{Sat Nov 1 15:40:19 2025}: pull --rebase origin main (pick): chore: remove service account file and ignore it
+[33md9d5628[m HEAD@{Sat Nov 1 15:40:19 2025}: pull --rebase origin main (pick): form commit
+[33m431b861[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m HEAD@{Sat Nov 1 15:40:19 2025}: pull --rebase origin main (start): checkout 431b8613310f650e39af0e9a846f3b3131dc1bbc
+[33m20b6793[m[33m ([m[1;32mbackup-pre-sync[m[33m)[m HEAD@{Sat Nov 1 15:32:07 2025}: commit: shobhit commit
+[33ma8eaeba[m HEAD@{Sat Nov 1 15:23:37 2025}: Branch: renamed refs/heads/main to refs/heads/main
+[33ma8eaeba[m HEAD@{Sat Nov 1 15:16:22 2025}: commit: fenew2 commit
+[33m16a48c5[m HEAD@{Sat Nov 1 14:45:52 2025}: commit: f commit
+[33m546bed6[m HEAD@{Sat Nov 1 14:36:40 2025}: commit: chore: remove service account file and ignore it
+[33mec6616e[m HEAD@{Sat Nov 1 14:32:40 2025}: commit: chore: remove service account file and ignore it
+[33m9f8cba2[m HEAD@{Sat Nov 1 14:28:36 2025}: commit: form commit
+[33m4a69978[m HEAD@{Wed Oct 29 12:06:09 2025}: commit: 8th commit
+[33mcae1e7a[m HEAD@{Tue Oct 28 15:59:34 2025}: commit: 7th commit
+[33m1bda598[m HEAD@{Tue Oct 28 15:56:14 2025}: commit: 6th commit
+[33mde560dc[m HEAD@{Tue Oct 28 15:48:23 2025}: commit: 5th commit
+[33m62506e6[m HEAD@{Tue Oct 28 15:38:45 2025}: Branch: renamed refs/heads/main to refs/heads/main
+[33m62506e6[m HEAD@{Tue Oct 28 15:38:42 2025}: commit: fourth commit
+[33mbbb99ab[m HEAD@{Tue Oct 28 15:19:18 2025}: Branch: renamed refs/heads/main to refs/heads/main
+[33mbbb99ab[m HEAD@{Tue Oct 28 15:19:15 2025}: commit: third commit
+[33m3654704[m HEAD@{Tue Oct 28 15:11:18 2025}: Branch: renamed refs/heads/main to refs/heads/main
+[33m3654704[m HEAD@{Tue Oct 28 15:11:12 2025}: commit: second commit
+[33m606b2f2[m HEAD@{Tue Oct 28 15:02:13 2025}: Branch: renamed refs/heads/main to refs/heads/main
+[33m606b2f2[m HEAD@{Tue Oct 28 15:02:10 2025}: commit: first commit2
+[33m40ce504[m HEAD@{Tue Oct 28 14:46:52 2025}: Branch: renamed refs/heads/master to refs/heads/main
+[33m40ce504[m HEAD@{Tue Oct 28 14:46:45 2025}: commit (initial): first commit
