@@ -87,3 +87,38 @@ export const authorize = (roles = []) => {
         next();
     };
 };
+
+export default function auth(req, res, next) {
+  try {
+    const header = req.headers["authorization"] || "";
+    const cookieToken = req.cookies?.auth_token;
+
+    // Accept JWT from:
+    // 1) Authorization: Bearer <token>
+    // 2) Cookie: auth_token
+    let token = null;
+
+    if (header.startsWith("Bearer ")) token = header.substring(7).trim();
+    else if (cookieToken) token = cookieToken;
+
+    if (!token) {
+      console.warn("auth middleware => no token in header/cookie");
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const secret = process.env.JWT_SECRET || "your_jwt_secret";
+    const payload = jwt.verify(token, secret);
+
+    // Expecting payload like: { userId, role, iat, exp }
+    if (!payload?.userId) {
+      console.warn("auth middleware => decoded but no userId", payload);
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    req.user = { userId: payload.userId, role: payload.role };
+    return next();
+  } catch (e) {
+    console.error("auth middleware error:", e.message);
+    return res.status(401).json({ success: false, message: "Unauthorized" });
+  }
+}

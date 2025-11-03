@@ -3,6 +3,8 @@ import Meeting from "../Models/Meeting.js";
 import Lead from "../Models/Lead.js";
 import Client from "../Models/Client.js";
 import cron from "node-cron";
+import User from "../Models/userSchema.js";
+import { sendToTokens } from "../service/push.service.js";
 
 // Helper function to share meeting details (simulate SMS)
 const shareMeetingDetails = async (phone, meeting) => {
@@ -29,53 +31,99 @@ ${meeting.meetingPassword ? `Password: ${meeting.meetingPassword}` : ""}
 export const addMeeting = async (req, res) => {
   try {
     const {
-      title, agenda, subCompany, organizer, participants,
+      title, agenda, subCompany, organizer, participants = [],
       lead, client, startTime, endTime, location,
       meetingLink, meetingPassword, notes
     } = req.body;
 
-    if (!title || !startTime || !endTime)
+    if (!title || !startTime || !endTime || !organizer) {
+      console.warn("addMeeting => missing fields", { title, startTime, endTime, organizer });
       return res.status(400).json({ success: false, message: "Missing required fields" });
-
-    let targetUser = null;
-    let fcmToken = null;
-
-    if (lead) {
-      targetUser = await Lead.findById(lead);
-      fcmToken = targetUser?.fcmToken;
-    } else if (client) {
-      targetUser = await Client.findById(client);
-      fcmToken = targetUser?.fcmToken;
     }
 
+    // Create meeting
     const meeting = await Meeting.create({
       title, agenda, subCompany, organizer,
       participants, lead, client,
       startTime, endTime, location, meetingLink, meetingPassword, notes,
+      createdNotified: false,
+      startNotified: false,
     });
 
-    // ✅ Send Push Notification
-    if (fcmToken) {
-      const payload = {
-        notification: {
-          title: "📅 New Meeting Scheduled",
-          body: `Title: ${meeting.title}\nDate: ${new Date(meeting.startTime).toLocaleString()}`,
-        },
-        data: {
-          meetingId: meeting._id.toString(),
-          click_action: "FLUTTER_NOTIFICATION_CLICK",
-        },
-      };
+    // Log raw input
+    console.log("addMeeting => created", {
+      meetingId: meeting._id.toString(),
+      organizer,
+      participantsCount: participants.length,
+      lead,
+      client,
+      start: startTime,
+    });
 
-      await admin.messaging().sendToDevice(fcmToken, payload);
-      console.log("✅ Push Notification sent to:", targetUser.name);
+    // Collect users (organizer + participants)
+    const userIds = [organizer, ...participants].filter(Boolean);
+    const users = await User.find({ _id: { $in: userIds } }, { fullName: 1, deviceTokens: 1 });
+    console.log("addMeeting => users found", {
+      inputIds: userIds.map(String),
+      found: users.map(u => ({ id: u._id.toString(), name: u.fullName, tokens: u.deviceTokens?.length || 0 })),
+    });
+
+    let deviceTokens = users.flatMap(u => u.deviceTokens || []);
+
+    // Optional: lead/client tokens (if you store them there)
+    if (lead) {
+      const leadDoc = await Lead.findById(lead);
+      if (leadDoc?.fcmToken) deviceTokens.push(leadDoc.fcmToken);
+      console.log("addMeeting => lead token present?", !!leadDoc?.fcmToken);
+    }
+    if (client) {
+      const clientDoc = await Client.findById(client);
+      if (clientDoc?.fcmToken) deviceTokens.push(clientDoc.fcmToken);
+      console.log("addMeeting => client token present?", !!clientDoc?.fcmToken);
+    }
+
+    deviceTokens = [...new Set(deviceTokens)];
+    console.log("addMeeting => total tokens", deviceTokens.length, deviceTokens.map(t => t.slice(-10)));
+
+    if (deviceTokens.length > 0) {
+      const resp = await sendToTokens({
+        tokens: deviceTokens,
+        title: "📅 New Meeting Scheduled",
+        body: `${title} • ${new Date(startTime).toLocaleString()}`,
+        data: {
+          type: "meeting",
+          meetingId: meeting._id.toString(),
+          startTime: new Date(startTime).toISOString(),
+          title,
+        },
+      });
+
+      console.log("addMeeting => FCM result", {
+        successCount: resp.successCount,
+        failureCount: resp.failureCount,
+      });
+
+      // Remove invalid tokens to keep DB clean
+      if (resp.failureCount > 0) {
+        const badTokens = dropInvalidTokens(resp, deviceTokens);
+        if (badTokens.length) {
+          console.warn("addMeeting => removing invalid tokens", badTokens.map(t => t.slice(-10)));
+          await User.updateMany(
+            { _id: { $in: userIds } },
+            { $pull: { deviceTokens: { $in: badTokens } } }
+          );
+        }
+      }
+
+      meeting.createdNotified = resp.successCount > 0;
+      await meeting.save();
     } else {
-      console.log("⚠️ No FCM token found for lead/client");
+      console.warn("addMeeting => no tokens to send");
     }
 
     res.status(201).json({
       success: true,
-      message: "Meeting created and notification sent",
+      message: "Meeting created (notifications attempted)",
       data: meeting,
     });
   } catch (err) {

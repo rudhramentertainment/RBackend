@@ -14,8 +14,7 @@ const SMTP_CONFIG = {
    connectionTimeout: 10000,
   greetingTimeout: 10000,
   socketTimeout: 15000,
-  logger: true,
-  debug: true,
+
 };
 
 let transporter;
@@ -287,3 +286,66 @@ export default {
   sendLeadEmail,
   sendClientNotification
 };
+
+
+
+// utils/emailService.js (add below your existing code)
+export async function sendEmailVerificationOtp(email, otp, name = "") {
+  try {
+    if (!transporter) {
+      console.error('❌ transporter not available');
+      return false;
+    }
+
+    const html = `
+    <!doctype html>
+    <html>
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width,initial-scale=1" />
+      <title>Email Verification</title>
+      <style>
+        body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial; background:${COLORS.bg}; margin:0; padding:24px; color:#111827; }
+        .card { max-width:520px; margin:0 auto; background:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 8px 30px rgba(16,24,40,0.08); }
+        .header { background: linear-gradient(90deg, ${COLORS.primary}, ${COLORS.accent}); color: #fff; padding:22px 20px; text-align:center; }
+        .header h1 { margin:0; font-size:18px; }
+        .content { padding:20px; }
+        .otp { font-weight:800; font-size:24px; letter-spacing:6px; background:#fff7ed; border-left:4px solid ${COLORS.primary}; padding:12px 16px; display:inline-block; border-radius:10px; }
+        .meta { margin-top:8px; color:#6b7280; font-size:13px; }
+        .footer { padding:14px 20px; background:#f8fafc; border-top:1px solid #eef2f7; font-size:12px; color:#6b7280; text-align:center; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="header">
+          <h1>Verify your email</h1>
+        </div>
+        <div class="content">
+          <p>Hello ${escapeHtml(name || '')},</p>
+          <p>Use the OTP below to verify your email for Rudhram Entertainment:</p>
+          <div class="otp">${escapeHtml(otp)}</div>
+          <p class="meta">This code expires in 10 minutes. If you didn’t request this, you can ignore this email.</p>
+        </div>
+        <div class="footer">
+          © Rudhram Entertainment
+        </div>
+      </div>
+    </body>
+    </html>`;
+
+    const mailOptions = {
+      from: `"Rudhram Verification" <${SMTP_CONFIG.auth.user}>`,
+      to: email,
+      subject: "Your Rudhram Verification Code",
+      html
+    };
+
+    const send = util.promisify(transporter.sendMail.bind(transporter));
+    const info = await send(mailOptions);
+    console.log('✅ OTP email sent:', info.messageId || info.response);
+    return true;
+  } catch (err) {
+    console.error('❌ sendEmailVerificationOtp error:', err);
+    return false;
+  }
+}

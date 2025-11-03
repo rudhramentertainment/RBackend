@@ -6,6 +6,9 @@ import Task from "../Models/Task.js";
 import TaskAssignment from "../Models/TaskAssignment.js";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
+import EmailOtp from "../Models/EmailOtp.js";
+import { sendEmailVerificationOtp } from "../utils/emailService.js";
 
     export const registerUser = async (req, res) => {
     try {
@@ -528,5 +531,238 @@ export const saveFcmToken = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+
+const OTP_TTL_MIN = 10;
+const MAX_ATTEMPTS = 5;
+
+const randomOtp = () => (Math.floor(100000 + Math.random() * 900000)).toString();
+
+export const registerInit = async (req, res) => {
+  try {
+    const {
+      fullName, email, phone, city, state, role, subCompany, password
+    } = req.body;
+
+    // Basic validation
+    if (!fullName || !email || !role || !password) {
+      return res.status(400).json({ success: false, message: "Full name, email, role, and password are required." });
+    }
+    if (!["SUPER_ADMIN","ADMIN","TEAM_MEMBER","CLIENT"].includes(role)) {
+      return res.status(400).json({ success: false, message: "Invalid role specified." });
+    }
+
+    // Duplicate check
+    const existing = await User.findOne({ email });
+    if (existing) {
+      return res.status(409).json({ success: false, message: "Email already in use." });
+    }
+
+    // Avatar (store path if uploaded, we'll move/attach later if you need)
+    let avatarUrl = null;
+    if (req.file) {
+      avatarUrl = `/uploads/${req.file.filename}`;
+    }
+
+    // Prepare payload to materialize after OTP verification
+    const hashedPassword = await User.hashPassword(password);
+    const payload = {
+      fullName, email, phone, city, state, role,
+      subCompany: (subCompany && mongoose.Types.ObjectId.isValid(subCompany)) ? subCompany : null,
+      passwordHash: hashedPassword,
+      avatarUrl
+    };
+
+    // Create OTP doc
+    const otp = randomOtp();
+    const otpHash = await bcrypt.hash(otp, 10);
+    const expiresAt = new Date(Date.now() + OTP_TTL_MIN * 60 * 1000);
+
+    // One per email: remove old ones (optional but nice)
+    await EmailOtp.deleteMany({ email });
+
+    const otpDoc = await EmailOtp.create({
+      email,
+      otpHash,
+      expiresAt,
+      payload
+    });
+
+    // Send email
+    const mailed = await sendEmailVerificationOtp(email, otp, fullName);
+    if (!mailed) {
+      // if email fails, clean doc
+      await EmailOtp.deleteOne({ _id: otpDoc._id });
+      return res.status(500).json({ success: false, message: "Failed to send verification email. Please try again." });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "OTP sent to email.",
+      tempId: otpDoc._id, // return for client to verify
+      expiresInSec: OTP_TTL_MIN * 60
+    });
+
+  } catch (err) {
+    console.error("registerInit error:", err);
+    return res.status(500).json({ success: false, message: "Server error.", error: err.message });
+  }
+};
+
+
+export const registerVerify = async (req, res) => {
+  try {
+    const { tempId, email, otp } = req.body;
+    if (!tempId || !email || !otp) {
+      return res.status(400).json({ success: false, message: "tempId, email and otp are required." });
+    }
+
+    const record = await EmailOtp.findById(tempId);
+    if (!record || record.email !== email) {
+      return res.status(400).json({ success: false, message: "Invalid or expired verification session." });
+    }
+
+    if (record.expiresAt < new Date()) {
+      await EmailOtp.deleteOne({ _id: record._id });
+      return res.status(400).json({ success: false, message: "OTP expired. Please start again." });
+    }
+
+    if (record.attempts >= MAX_ATTEMPTS) {
+      await EmailOtp.deleteOne({ _id: record._id });
+      return res.status(429).json({ success: false, message: "Too many attempts. Please restart." });
+    }
+
+    const ok = await bcrypt.compare(otp, record.otpHash);
+    if (!ok) {
+      record.attempts += 1;
+      await record.save();
+      return res.status(400).json({ success: false, message: "Incorrect OTP." });
+    }
+
+    // Create user
+    const {
+      fullName, phone, city, state, role, subCompany, passwordHash, avatarUrl
+    } = record.payload;
+
+    // Final duplicate guard (race)
+    const exists = await User.findOne({ email });
+    if (exists) {
+      await EmailOtp.deleteOne({ _id: record._id });
+      return res.status(409).json({ success: false, message: "Email already registered." });
+    }
+
+    const user = await User.create({
+      fullName, email, phone, city, state, role, subCompany, passwordHash, avatarUrl,
+      isEmailVerified: true
+    });
+
+    await EmailOtp.deleteOne({ _id: record._id });
+
+    return res.status(201).json({
+      success: true,
+      message: "User registered and verified.",
+      userId: user._id,
+      avatar: avatarUrl
+    });
+
+  } catch (err) {
+    console.error("registerVerify error:", err);
+    return res.status(500).json({ success: false, message: "Server error.", error: err.message });
+  }
+};
+
+
+export const registerResendOtp = async (req, res) => {
+  try {
+    const { tempId, email } = req.body;
+    if (!tempId || !email) {
+      return res.status(400).json({ success: false, message: "tempId and email are required." });
+    }
+    const record = await EmailOtp.findById(tempId);
+    if (!record || record.email !== email) {
+      return res.status(400).json({ success: false, message: "Invalid verification session." });
+    }
+
+    // new OTP
+    const otp = (Math.floor(100000 + Math.random() * 900000)).toString();
+    record.otpHash = await bcrypt.hash(otp, 10);
+    record.expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    record.attempts = 0;
+    await record.save();
+
+    const mailed = await sendEmailVerificationOtp(email, otp, record.payload?.fullName);
+    if (!mailed) {
+      return res.status(500).json({ success: false, message: "Failed to send OTP." });
+    }
+
+    return res.status(200).json({ success: true, message: "OTP resent.", expiresInSec: 10 * 60 });
+
+  } catch (err) {
+    console.error("registerResendOtp error:", err);
+    return res.status(500).json({ success: false, message: "Server error.", error: err.message });
+  }
+};
+
+
+
+export const getAllMembers = async (req, res) => {
+  try {
+    console.log("📥 Fetching all members with query:", req.query);
+
+    const { role, subCompany, isActive, page = 1, limit = 20 } = req.query;
+
+    // --- Build dynamic filter ---
+    const filter = {};
+    if (role) filter.role = role;
+    if (subCompany) filter.subCompany = subCompany;
+    if (isActive !== undefined) filter.isActive = isActive === "true";
+
+    // --- Pagination setup ---
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // --- Fetch users excluding sensitive fields ---
+    const users = await User.find(filter)
+      .select("-passwordHash -deviceTokens") // exclude sensitive fields
+      .populate("subCompany", "name") // populate subCompany name if needed
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const totalUsers = await User.countDocuments(filter);
+
+    res.status(200).json({
+      success: true,
+      message: "Members fetched successfully",
+      total: totalUsers,
+      currentPage: parseInt(page),
+      totalPages: Math.ceil(totalUsers / limit),
+      data: users,
+    });
+  } catch (error) {
+    console.error("❌ Error fetching members:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching members",
+      error: error.message,
+    });
+  }
+};
+
+
+// src/controllers/device.controller.js (append)
+export const removeDeviceToken = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    const { token } = req.body;
+    if (!userId || !token) {
+      return res.status(400).json({ success: false, message: "Missing user or token." });
+    }
+    await User.findByIdAndUpdate(userId, { $pull: { deviceTokens: token } });
+    return res.json({ success: true, message: "Device token removed." });
+  } catch (e) {
+    console.error("removeDeviceToken error:", e);
+    res.status(500).json({ success: false, message: "Failed to remove token." });
   }
 };

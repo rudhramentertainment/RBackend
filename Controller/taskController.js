@@ -238,13 +238,24 @@ export const getAllTasks = async (req, res) => {
       .populate("createdBy", "fullName email")
       .sort({ createdAt: -1 });
 
+
+      
     // Optional: add limit
     if (limit) query = query.limit(Number(limit));
 
     const tasks = await query;
 
     // 🆕 ENHANCEMENT: If user is requesting their own tasks, include assignment data
-    let enhancedTasks = tasks;
+    let enhancedTasks = await Promise.all(
+  tasks.map(async (task) => {
+    const assignments = await TaskAssignment.find({ task: task._id })
+      .populate("user", "fullName email avatarUrl");
+
+    const taskObj = task.toObject();
+    taskObj.assignments = assignments;
+    return taskObj;
+  })
+);
     
     if (assignedTo === "me" || req.query.includeAssignment === "true") {
       enhancedTasks = await Promise.all(
@@ -354,6 +365,60 @@ export const updateTaskProgress = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+// UPDATE TASK STATUS (TEAM MEMBER)
+export const updateTaskStatus = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { status } = req.body;
+    const userId = req.user._id;
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required",
+      });
+    }
+
+    // find assignment of this user for this task
+    const assignment = await TaskAssignment.findOne({
+      task: taskId,
+      user: userId,
+    });
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        message: "Task assignment not found for this user",
+      });
+    }
+
+    assignment.status = status;
+
+    assignment.logs.push({
+      action: "Status updated",
+      by: userId,
+      at: new Date(),
+      extra: { status },
+    });
+
+    await assignment.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Status updated successfully",
+      data: assignment,
+    });
+
+  } catch (err) {
+    console.log("Error updating status:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
 // 🆕 ALTERNATIVE: More robust version of getMyTasks
 // TEMPORARY FIX for getMyTasks
 export const getMyTasks = async (req, res) => {
