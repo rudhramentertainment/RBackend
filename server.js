@@ -20,6 +20,7 @@ import mongoose from 'mongoose';
 // import deviceRoutes from './Routes/device.routes.js';
 // import debugRoutes from './Routes/debug.routes.js';
 // import './cron/meetingReminder.cron.js';
+import { registerTaskReminderCron } from "./jobs/taskReminders.cron.js";
 
 
 let app = express();
@@ -70,6 +71,7 @@ app.use((err, req, res, next) => {
   });
 });
 
+registerTaskReminderCron();
 const startServer = async () => {
   try {
     console.log("⏳ Connecting to MongoDB...");
