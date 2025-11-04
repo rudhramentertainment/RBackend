@@ -41,6 +41,7 @@ export const createSubCompany = async (req, res) => {
   }
 };
 
+
 export const getAllSubCompanies = async (req, res) => {
   try {
     const subCompanies = await SubCompany.find();
