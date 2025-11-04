@@ -7,6 +7,7 @@ import Client from "../Models/Client.js";
 import SubCompany from "../Models/SubCompany.js";
 import mongoose from "mongoose";
 import puppeteer from "puppeteer";
+import { executablePath } from "puppeteer";
 
 function numberToWords(num) {
   if (num == null || isNaN(num)) return "Zero Rupees";
@@ -313,7 +314,11 @@ export const generateInvoicePDF = async (req, res) => {
     `;
 
     // === Render PDF via puppeteer ===
-    const browser = await puppeteer.launch({ args: ["--no-sandbox", "--disable-setuid-sandbox"] });
+    const browser = await puppeteer.launch({
+  headless: true,
+  executablePath: executablePath(),
+  args: ["--no-sandbox", "--disable-setuid-sandbox"]
+});
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
     await page.emulateMediaType("screen");
