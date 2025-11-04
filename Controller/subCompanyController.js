@@ -5,12 +5,12 @@ import TaskAssignment from "../Models/TaskAssignment.js";
 import User from "../Models/userSchema.js";
 import mongoose from "mongoose";
 
-export const createSubCompany  = async (req, res) => {
-    try {
-    const { name, description, logoUrl, invoiceFormat, receiptFormat, services } = req.body;
+export const createSubCompany = async (req, res) => {
+  try {
+    const { name, description, logoUrl, prefix, invoiceFormat, receiptFormat, services } = req.body;
 
-    if (!name ) {
-      return res.status(400).json({ success: false, message: "Name are required" });
+    if (!name || !prefix) {
+      return res.status(400).json({ success: false, message: "Name and prefix are required" });
     }
 
     const existing = await SubCompany.findOne({ name });
@@ -22,6 +22,7 @@ export const createSubCompany  = async (req, res) => {
       name,
       description,
       logoUrl,
+      prefix, // ← REQUIRED by schema
       invoiceFormat,
       receiptFormat,
       services
@@ -38,7 +39,7 @@ export const createSubCompany  = async (req, res) => {
     console.error("Error creating SubCompany:", error);
     res.status(500).json({ success: false, message: "Server Error", error: error.message });
   }
-}
+};
 
 export const getAllSubCompanies = async (req, res) => {
   try {
