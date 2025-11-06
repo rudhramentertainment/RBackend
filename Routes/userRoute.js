@@ -3,6 +3,7 @@ import { deleteTeamMember, getAllMembers, getAllTeamMembers, getTeamMemberDetail
 import auth, { authenticate, authorize } from "../Middleware/authentication.js";
 import upload from "../Middleware/uploadMiddleware.js";
 import { saveDeviceToken } from "../Controller/device.controller.js";
+import Notification from "../Models/Notification.js";
 
 const app = express();
 
@@ -41,5 +42,45 @@ app.get("/my-tokens",auth,  async (req, res) => {
 });
 
 
+
+//notification
+
+// GET /api/v1/user/notifications
+app.get("/notifications", auth, async (req, res) => {
+  try {
+    const userId = req.user?.userId;               // <- FIX: use userId
+    if (!userId) return res.status(401).json({ success:false, message:"Unauthorized" });
+
+    const q = { user: userId };
+
+    // Optional per-device filter (only if header is present)
+    if (req.userDeviceToken) {
+      q.$or = [
+        { deviceToken: req.userDeviceToken },
+        { deviceToken: { $exists: false } }, // also return old records without deviceToken
+      ];
+    }
+
+    const noti = await Notification.find(q).sort({ createdAt: -1 });
+    return res.json({ success: true, data: noti });
+  } catch (e) {
+    console.error("GET /notifications error:", e);
+    return res.status(500).json({ success:false, message:"Server error" });
+  }
+});
+
+// DELETE /api/v1/user/notifications/:id
+app.delete("/notifications/:id", auth, async (req, res) => {
+  try {
+    const userId = req.user?.userId;               // <- FIX: use userId
+    if (!userId) return res.status(401).json({ success:false, message:"Unauthorized" });
+
+    await Notification.findOneAndDelete({ _id: req.params.id, user: userId });
+    return res.json({ success: true });
+  } catch (e) {
+    console.error("DELETE /notifications/:id error:", e);
+    return res.status(500).json({ success:false, message:"Server error" });
+  }
+});
 
 export default app;

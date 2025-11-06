@@ -349,3 +349,89 @@ export async function sendEmailVerificationOtp(email, otp, name = "") {
     return false;
   }
 }
+
+
+// === ADD: send invoice email with PDF attachment ===
+export async function sendInvoiceEmail({ client, invoice, filePath /*, publicUrl */ }) {
+  try {
+    if (!client || !client.email) {
+      console.log('⚠️ sendInvoiceEmail skipped: missing client/email');
+      return false;
+    }
+    if (!transporter) {
+      console.error('❌ transporter not available');
+      return false;
+    }
+
+    const safe = (v) => (v == null ? '' : String(v));
+    const fmtDate = (d) => {
+      try { return new Date(d).toLocaleDateString('en-IN'); } catch { return ''; }
+    };
+
+    const html = `
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width,initial-scale=1"/>
+        <title>Invoice ${safe(invoice.invoiceNo)}</title>
+        <style>
+          body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial; background:${COLORS.bg}; margin:0; padding:24px; color:#111827; }
+          .card { max-width:720px; margin:0 auto; background:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 8px 30px rgba(16,24,40,0.08); }
+          .header { background: linear-gradient(90deg, ${COLORS.primary}, ${COLORS.accent}); color:#fff; padding:22px; }
+          .header h1 { margin:0; font-size:18px; }
+          .content { padding:20px 22px; line-height:1.55; }
+          .footer { padding:14px 22px; background:#f8fafc; color:#6b7280; font-size:12px; }
+          .pill { display:inline-block; background:#fff7ed; border-left:4px solid ${COLORS.primary}; padding:8px 12px; border-radius:10px; font-weight:700; color:${COLORS.primary}; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="header">
+            <h1>Invoice ${escapeHtml(invoice.invoiceNo || '')}</h1>
+          </div>
+          <div class="content">
+            <p>Dear ${escapeHtml(client.name || 'Customer')},</p>
+            <p>This is your invoice. Please download the attached PDF and keep it for your records.</p>
+
+            <p class="pill">Total: ₹${Number(invoice.totalAmount || 0).toFixed(2)}</p>
+
+            <p style="margin-top:10px;">
+              <strong>Invoice No:</strong> ${escapeHtml(invoice.invoiceNo || '')}<br/>
+              <strong>Date:</strong> ${fmtDate(invoice.invoiceDate)}<br/>
+              <strong>Due Date:</strong> ${fmtDate(invoice.dueDate)}
+            </p>
+
+            <p style="margin-top:10px;">
+              If you have any questions, just reply to this email.
+            </p>
+          </div>
+          <div class="footer">Rudhram Entertainment</div>
+        </div>
+      </body>
+    </html>`;
+
+    const mailOptions = {
+      from: `"Rudhram Invoices" <${SMTP_CONFIG.auth.user}>`,
+      to: client.email,
+      subject: `Invoice ${safe(invoice.invoiceNo)} — ₹${Number(invoice.totalAmount || 0).toFixed(2)}`,
+      html,
+      attachments: [
+        {
+          filename: `${safe(invoice.invoiceNo)}.pdf`,
+          path: filePath,
+          contentType: 'application/pdf',
+        },
+      ],
+    };
+
+    const send = util.promisify(transporter.sendMail.bind(transporter));
+    const info = await send(mailOptions);
+    console.log('✅ Invoice email sent:', info.messageId || info.response);
+    return true;
+  } catch (err) {
+    console.error('❌ sendInvoiceEmail error:', err);
+    return false;
+  }
+}
+

@@ -17,10 +17,14 @@ import receiptRoutes from './Routes/receiptRoutes.js';
 import cookieParser from "cookie-parser";
 import cors from 'cors'; 
 import mongoose from 'mongoose';
+import messageRoutes from './Routes/messageRoutes.js';
 // import deviceRoutes from './Routes/device.routes.js';
 // import debugRoutes from './Routes/debug.routes.js';
 // import './cron/meetingReminder.cron.js';
 import { registerTaskReminderCron } from "./jobs/taskReminders.cron.js";
+import { scheduleBirthdayJob } from "./jobs/birthdayNotifier.js";
+
+
 
 
 let app = express();
@@ -51,6 +55,7 @@ app.use('/api/v1/drive',driveRoutes);
 app.use('/api/v1/client',clientRoutes);
 app.use('/api/v1/invoice',invoiceRoute);
 app.use('/api/v1/receipts',receiptRoutes);
+app.use("/api/v1/message", messageRoutes);
 // app.use('/api/device', deviceRoutes);
 // app.use('/debug', debugRoutes);
 
@@ -72,6 +77,7 @@ app.use((err, req, res, next) => {
 });
 
 registerTaskReminderCron();
+scheduleBirthdayJob();
 const startServer = async () => {
   try {
     console.log("⏳ Connecting to MongoDB...");
@@ -89,3 +95,4 @@ const startServer = async () => {
 };
 
 startServer();
+

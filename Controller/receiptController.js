@@ -30,49 +30,48 @@ import mongoose from "mongoose";
 //   str += (n[5] != 0) ? ((str != "") ? "and " : "") + (a[Number(n[5])] || b[n[5][0]] + " " + a[n[5][1]]) + " " : "";
 //   return str + "Only";
 // };
+import ReceiptCounter from "../Models/ReceiptCounter.js"; // <-- add this model
 
+
+// ---------- helpers ----------
 function numberToWords(num) {
   if (num == null || isNaN(num)) return "Zero";
   const rupees = Math.floor(num);
   const paise = Math.round((num - rupees) * 100);
-  const ones = ["", "One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"];
-  const tens = ["", "", "Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"];
-  function conv(n) {
-    if (n < 20) return ones[n];
-    if (n < 100) return tens[Math.floor(n/10)] + (n%10 ? " " + ones[n%10] : "");
-    if (n < 1000) return ones[Math.floor(n/100)] + " Hundred" + (n%100 ? " " + conv(n%100) : "");
-    if (n < 100000) return conv(Math.floor(n/1000)) + " Thousand" + (n%1000 ? " " + conv(n%1000) : "");
-    if (n < 10000000) return conv(Math.floor(n/100000)) + " Lakh" + (n%100000 ? " " + conv(n%100000) : "");
-    return conv(Math.floor(n/10000000)) + " Crore" + (n%10000000 ? " " + conv(n%10000000) : "");
+  const ones = ["","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"];
+  const tens = ["","", "Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"];
+  function conv(n){
+    if(n<20) return ones[n];
+    if(n<100) return tens[Math.floor(n/10)] + (n%10 ? " " + ones[n%10] : "");
+    if(n<1000) return ones[Math.floor(n/100)] + " Hundred" + (n%100? " " + conv(n%100):"");
+    if(n<100000) return conv(Math.floor(n/1000)) + " Thousand" + (n%1000? " " + conv(n%1000):"");
+    if(n<10000000) return conv(Math.floor(n/100000)) + " Lakh" + (n%100000? " " + conv(n%100000):"");
+    return conv(Math.floor(n/10000000)) + " Crore" + (n%10000000? " " + conv(n%10000000):"");
   }
   let w = conv(rupees) + " Rupees";
   if (paise > 0) w += " and " + conv(paise) + " Paise";
   return w;
 }
-
 function escapeHtml(str) {
   if (str == null) return "";
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
-
 function embedLocalImageAsDataUri(possiblePaths) {
   if (!possiblePaths) return null;
   const arr = Array.isArray(possiblePaths) ? possiblePaths : [possiblePaths];
-  const candidates = [];
+  const list = [];
   for (let p of arr) {
     if (!p) continue;
     if (p.startsWith("/")) p = p.replace(/^\/+/, "");
-    candidates.push(path.join(process.cwd(), p));
-    candidates.push(path.join(process.cwd(), "public", p));
-    candidates.push(path.join(process.cwd(), "assets", p));
-    candidates.push(path.join(process.cwd(), "uploads", p));
-    candidates.push(path.join(process.cwd(), p));
+    list.push(
+      path.join(process.cwd(), p),
+      path.join(process.cwd(), "public", p),
+      path.join(process.cwd(), "assets", p),
+      path.join(process.cwd(), "uploads", p),
+      path.join(process.cwd(), p)
+    );
   }
-  for (const c of candidates) {
+  for (const c of list) {
     try {
       if (fs.existsSync(c)) {
         const buff = fs.readFileSync(c);
@@ -80,89 +79,129 @@ function embedLocalImageAsDataUri(possiblePaths) {
         let mime = "image/png";
         if (ext === ".jpg" || ext === ".jpeg") mime = "image/jpeg";
         if (ext === ".svg") mime = "image/svg+xml";
-        const base64 = buff.toString("base64");
-        return `data:${mime};base64,${base64}`;
+        return `data:${mime};base64,${buff.toString("base64")}`;
       }
-    } catch (err) {
-      continue;
-    }
+    } catch {}
   }
   return null;
 }
-// -------------------- end helpers --------------------
-
-// Helper to get atomic incrementing sequence value
-async function getNextSequenceValue(sequenceName) {
-  // use native collection to avoid creating a model
-  const coll = mongoose.connection.collection('counters');
-  const result = await coll.findOneAndUpdate(
-    { _id: sequenceName },
-    { $inc: { seq: 1 } },
-    { upsert: true, returnDocument: 'after' } // returnDocument:'after' works with Node MongoDB driver >=4.0
-  );
-  // If result.value is missing (very unlikely), default to 1
-  const seq = (result && result.value && result.value.seq) ? result.value.seq : 1;
-  return seq;
+function formatReceiptNo(seq, prefix = "RUD", minPad = 3) {
+  const padLen = Math.max(minPad, String(seq).length);
+  return `${prefix}-${String(seq).padStart(padLen, "0")}`;
 }
 
+// Ensure counter doc exists (once)
+async function ensureCounter() {
+  await ReceiptCounter.updateOne(
+    { _id: "global" },
+    { $setOnInsert: { lastSeq: 0, prefix: "RUD", pad: 3 } },
+    { upsert: true }
+  );
+}
 
+// Atomic next sequence (works on standalone MongoDB)
+async function nextSeq() {
+  await ensureCounter();
+  const updated = await ReceiptCounter.findByIdAndUpdate(
+    "global",
+    { $inc: { lastSeq: 1 } },
+    { new: true }
+  ).lean();
+  return { seq: updated.lastSeq, prefix: updated.prefix || "RUD", pad: updated.pad || 3 };
+}
+
+// ---------- controller ----------
 export const generateReceipt = async (req, res) => {
   try {
     const { invoiceNo, paymentType, chequeOrTxnNo, notes, amount } = req.body;
 
-    // 1) find invoice and populate client
+    // 1) load invoice + client
     const invoice = await Invoice.findOne({ invoiceNo }).populate("client");
     if (!invoice) {
       return res.status(404).json({ success: false, message: "Invoice not found" });
     }
-    const client = invoice.client || {};
+    const client = invoice.client;
 
-    // 2) receipt number
-   const seq = await getNextSequenceValue('receiptSeq'); // name the counter key
-const receiptNo = `RUD-${String(seq).padStart(3, '0')}`;
+    // 2) normalize paymentType (match enum)
+    const p = (paymentType || "Cash").toString().trim().toLowerCase();
+    const paymentTypeCap = p === "online" ? "Online" : p === "cheque" ? "Cheque" : "Cash";
 
-    // 3) amount and words
-    const paymentAmount = (typeof amount !== "undefined" && amount !== null) ? Number(amount) : Number(invoice.totalAmount || 0);
-    const amountRounded = Number(paymentAmount.toFixed(2));
+    // 3) amount + words
+    const paymentAmount = (amount ?? invoice.totalAmount ?? 0);
+    const amountRounded = Number(Number(paymentAmount).toFixed(2));
     const amountWords = numberToWords(amountRounded);
 
-    // 4) save receipt doc (we'll update pdfUrl and save after pdf generation)
-    const receipt = new Receipt({
-      receiptNo,
-      client: client._id || null,
-      invoice: invoice._id,
-      amount: amountRounded,
-      amountInWords: amountWords,
-      paymentType: paymentType || "cash",
-      chequeOrTxnNo: chequeOrTxnNo || "",
-      notes: notes || "",
-      receiptDate: new Date()
-    });
+    // 4) allocate a unique seq + save receipt (retry if duplicate)
+    const maxRetries = 5;
+    let attempt = 0;
+    let saved; // Receipt doc
 
-    // 5) prepare receipts dir
+    while (attempt < maxRetries) {
+      attempt += 1;
+      const { seq, prefix, pad } = await nextSeq();
+      const receiptNo = formatReceiptNo(seq, prefix, pad);
+
+      try {
+        saved = await Receipt.create({
+          seq,
+          receiptNo,
+          client: client._id,
+          invoice: invoice._id,
+          amount: amountRounded,
+          amountInWords: amountWords,
+          paymentType: paymentTypeCap,
+          chequeOrTxnNo: chequeOrTxnNo || "",
+          notes: notes || "",
+          receiptDate: new Date(),
+          pdfUrl: "",
+        });
+        break; // success
+      } catch (e) {
+        const isDup = e?.code === 11000 || /duplicate key/i.test(e?.message || "");
+        if (!isDup || attempt >= maxRetries) throw e;
+        // duplicate rare race: loop to get the next seq and try again
+      }
+    }
+
+    // 5) render PDF
     const receiptsDir = path.resolve("receipts");
     if (!fs.existsSync(receiptsDir)) fs.mkdirSync(receiptsDir, { recursive: true });
+
+    const mainLogoData = embedLocalImageAsDataUri([
+      "logo.png","/logo.png","public/logo.png","assets/logo.png","public/assets/logo.png"
+    ]);
+
+    const receiptNo = saved.receiptNo;
     const pdfFilename = `${receiptNo}.pdf`;
     const pdfPath = path.join(receiptsDir, pdfFilename);
 
-    // 6) embed logo (try common locations)
-    const mainLogoCandidates = ["logo.png", "/logo.png", "public/logo.png", "assets/logo.png", "public/assets/logo.png"];
-    const mainLogoData = embedLocalImageAsDataUri(mainLogoCandidates);
+    const invoiceDateStr = invoice.invoiceDate ? new Date(invoice.invoiceDate).toLocaleDateString("en-GB") : "";
+    const receiptDateStr = new Date().toLocaleDateString("en-GB");
+    const clientIdToPrint = client.clientId || client.clientCode || "";
 
-    // 7) format dates
-    const invoiceDateStr = invoice.invoiceDate ? new Date(invoice.invoiceDate).toLocaleDateString('en-GB') : "";
-    const receiptDateStr = new Date().toLocaleDateString('en-GB');
+    // precompute strings (avoid nested ${} in template)
+    const brandName = "RUDHRAM";
+    const tagLine = "entertainment — Leading What's Next..!";
+    const receiptNoEsc = escapeHtml(receiptNo);
+    const receiptDateEsc = escapeHtml(receiptDateStr);
+    const clientNameEsc = escapeHtml(client.name || client.customerName || "—");
+    const clientIdRow = clientIdToPrint ? `<div class="small" style="margin-top:4px">Client ID: <strong>${escapeHtml(clientIdToPrint)}</strong></div>` : "";
+    const amountWordsEsc = escapeHtml(amountWords) + " Only";
+    const invoiceNoEsc = escapeHtml(invoice.invoiceNo || "-");
+    const invoiceDateEsc = escapeHtml(invoiceDateStr || "-");
+    const payTypeEsc = escapeHtml(paymentTypeCap);
+    const txnEsc = escapeHtml(chequeOrTxnNo || "-");
+    const amountRoundedStr = amountRounded.toFixed(2);
+    const notesHtml = notes ? `<div class="divider"></div><div class="small"><strong>Notes:</strong> ${escapeHtml(String(notes).slice(0, 800))}</div>` : "";
+    const logoHtml = mainLogoData
+      ? `<img src="${mainLogoData}" style="width:100%;height:auto;display:block" />`
+      : `<div style="font-weight:700;color:#B87333">R</div>`;
 
-    // get clientId to print (fall back if different field name used)
-    const clientIdToPrint = client.clientId || client.clientCode || clientId || "";
-
-    // 8) build HTML (professional layout) — clientId included under client name, amount in words not italic
-    const html = `
-<!doctype html>
+    const html = `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>Receipt ${receiptNo}</title>
+<title>Receipt ${receiptNoEsc}</title>
 <style>
   @page { size: A4; margin: 10mm 10mm; }
   body{font-family: Arial, Helvetica, sans-serif; margin:0; color:#222; -webkit-print-color-adjust:exact;}
@@ -184,7 +223,6 @@ const receiptNo = `RUD-${String(seq).padStart(3, '0')}`;
   .footer {margin-top:30px;text-align:center;color:#B87333;font-size:11px;}
   .divider {height:1px;background:linear-gradient(90deg,#fff,#e6d6c6,#fff);margin:12px 0;border-radius:1px;}
   .small {font-size:11px;color:#777;}
-  /* amount words normal (no italic) */
   .amount-words { margin-top:6px; font-style: normal; font-size:13px; color:#444; }
 </style>
 </head>
@@ -192,62 +230,50 @@ const receiptNo = `RUD-${String(seq).padStart(3, '0')}`;
   <div class="page">
     <div class="card">
       <div class="top">
-        <div class="logo">
-          ${ mainLogoData ? `<img src="${mainLogoData}" style="width:100%;height:auto;display:block" />` : `<div style="font-weight:700;color:#B87333">R</div>` }
-        </div>
-
+        <div class="logo">${logoHtml}</div>
         <div>
-          <div class="brand">RUDHRAM</div>
-          <div class="tag">entertainment — Leading What's Next..!</div>
+          <div class="brand">${escapeHtml(brandName)}</div>
+          <div class="tag">${escapeHtml(tagLine)}</div>
         </div>
-
-        <div class="title">
-          <h1>Receipt</h1>
-        </div>
-
+        <div class="title"><h1>Receipt</h1></div>
         <div class="meta">
-          <div><strong>Receipt No:</strong> ${escapeHtml(receiptNo)}</div>
-          <div><strong>Date:</strong> ${escapeHtml(receiptDateStr)}</div>
+          <div><strong>Receipt No:</strong> ${receiptNoEsc}</div>
+          <div><strong>Date:</strong> ${receiptDateEsc}</div>
         </div>
       </div>
 
       <div class="content">
         <div class="muted">Received with thanks from</div>
-        <div style="font-weight:700;margin-top:6px">${escapeHtml(client.name || client.customerName || "—")}</div>
-        ${ clientIdToPrint ? `<div class="small" style="margin-top:4px">Client ID: <strong>${escapeHtml(clientIdToPrint)}</strong></div>` : "" }
+        <div style="font-weight:700;margin-top:6px">${clientNameEsc}</div>
+        ${clientIdRow}
 
         <div style="margin-top:10px" class="muted">a sum of Rupees</div>
-        <div class="amount-words">${escapeHtml(amountWords)} Only</div>
+        <div class="amount-words">${amountWordsEsc}</div>
 
         <div style="margin-top:12px" class="grid">
           <div>
             <div class="small"><strong>Against Invoice Number</strong></div>
-            <div style="margin-top:6px">${escapeHtml(invoice.invoiceNo || "-")}</div>
+            <div style="margin-top:6px">${invoiceNoEsc}</div>
 
             <div style="margin-top:10px" class="small"><strong>Dated</strong></div>
-            <div style="margin-top:6px">${escapeHtml(invoiceDateStr || "-")}</div>
+            <div style="margin-top:6px">${invoiceDateEsc}</div>
 
             <div style="margin-top:10px" class="small"><strong>Through</strong></div>
-            <div style="margin-top:6px">${escapeHtml(paymentType || "N/A")}</div>
+            <div style="margin-top:6px">${payTypeEsc}</div>
 
             <div style="margin-top:10px" class="small"><strong>Txn/Cheque No</strong></div>
-            <div style="margin-top:6px">${escapeHtml(chequeOrTxnNo || "-")}</div>
+            <div style="margin-top:6px">${txnEsc}</div>
           </div>
 
           <div>
             <div class="small">Amount</div>
-            <div class="amount-box">₹ ${amountRounded.toFixed(2)}</div>
+            <div class="amount-box">₹ ${amountRoundedStr}</div>
           </div>
         </div>
 
-        <div class="divider"></div>
+        ${notesHtml}
 
-        ${ notes ? `<div class="small"><strong>Notes:</strong> ${escapeHtml(String(notes).slice(0, 800))}</div>` : "" }
-
-        <div class="sig">
-          <div class="line">Authorised Signatory</div>
-        </div>
-
+        <div class="sig"><div class="line">Authorised Signatory</div></div>
       </div>
 
       <div class="footer">
@@ -257,22 +283,13 @@ const receiptNo = `RUD-${String(seq).padStart(3, '0')}`;
     </div>
   </div>
 </body>
-</html>
-`;
+</html>`;
 
-    // 9) render PDF with puppeteer (use safe wait)
-    const browser = await puppeteer.launch({
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      headless: true
-    });
-
+    const browser = await puppeteer.launch({ args: ["--no-sandbox","--disable-setuid-sandbox"], headless: true });
     try {
       const page = await browser.newPage();
       await page.setContent(html, { waitUntil: "networkidle0" });
-
-      // small pause to let image/data-URI reflows happen on some systems
-      await new Promise((r) => setTimeout(r, 120)); // compatible with all puppeteer versions
-
+      await new Promise(r => setTimeout(r, 120));
       await page.emulateMediaType("screen");
       await page.pdf({
         path: pdfPath,
@@ -284,14 +301,17 @@ const receiptNo = `RUD-${String(seq).padStart(3, '0')}`;
       await browser.close();
     }
 
-    // 10) persist pdfUrl and save receipt
-    receipt.pdfUrl = `/receipts/${pdfFilename}`;
-    await receipt.save();
+    // 6) patch pdfUrl
+    const updated = await Receipt.findByIdAndUpdate(
+      saved._id,
+      { $set: { pdfUrl: `/receipts/${pdfFilename}` } },
+      { new: true }
+    );
 
     return res.status(201).json({
       success: true,
       message: "Receipt generated successfully",
-      data: receipt
+      data: updated,
     });
 
   } catch (error) {
@@ -299,7 +319,6 @@ const receiptNo = `RUD-${String(seq).padStart(3, '0')}`;
     return res.status(500).json({ success: false, message: "Failed to generate receipt", error: error.message });
   }
 };
-
 export const getAllReceipts = async (req, res) => {
   try {
     const receipts = await Receipt.find()

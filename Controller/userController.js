@@ -9,88 +9,97 @@ import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import EmailOtp from "../Models/EmailOtp.js";
 import { sendEmailVerificationOtp } from "../utils/emailService.js";
+import { parseBirthDate } from "./_helpers/date.js";
 
-    export const registerUser = async (req, res) => {
-    try {
-        const {
-        fullName,
-        email,
-        phone,
-        city,
-        state,
-        role,
-        subCompany,
-        password,
-        } = req.body;
+   export const registerUser = async (req, res) => {
+  try {
+    const {
+      fullName,
+      email,
+      phone,
+      city,
+      state,
+      role,
+      subCompany,
+      password,
+      birthDate, // ✅ new
+    } = req.body;
 
-        let subCompanyId = null;
-        if (subCompany && mongoose.Types.ObjectId.isValid(subCompany)) {
-        subCompanyId = subCompany;
-        }
-
-        // ✅ Avatar upload (if file present)
-        let avatarUrl = null;
-        if (req.file) {
-        avatarUrl = `/uploads/${req.file.filename}`;
-        }
-
-        // Basic validation
-        if (!fullName || !email || !role || !password) {
-        return res.status(400).json({
-            success: false,
-            message: "Full name, email, role, and password are required.",
-        });
-        }
-
-        if (!["SUPER_ADMIN","ADMIN","TEAM_MEMBER","CLIENT"].includes(role)) {
-        return res.status(400).json({
-            success: false,
-            message: "Invalid role specified.",
-        });
-        }
-
-        // Check for existing user
-        const existingUser = await User.findOne({ email });
-        if (existingUser) {
-        return res.status(409).json({
-            success: false,
-            message: "Email already in use.",
-        });
-        }
-
-        // Hash password
-        const hashedPassword = await User.hashPassword(password);
-
-        // Create and save user
-        const newUser = new User({
-        fullName,
-        email,
-        phone,
-        city,
-        state,
-        role,
-        subCompany: subCompanyId,
-        passwordHash: hashedPassword,
-        avatarUrl, // ✅ save uploaded avatar
-        });
-
-        const savedUser = await newUser.save();
-
-        return res.status(201).json({
-        success: true,
-        message: "User registered successfully.",
-        userId: savedUser._id,
-        avatar: avatarUrl,
-        });
-    } catch (err) {
-        console.error("Registration error:", err);
-        return res.status(500).json({
-        success: false,
-        message: "Server error during registration.",
-        error: err.message,
-        });
+    let subCompanyId = null;
+    if (subCompany && mongoose.Types.ObjectId.isValid(subCompany)) {
+      subCompanyId = subCompany;
     }
-    };
+
+    // Avatar upload (if file present via multer)
+    let avatarUrl = null;
+    if (req.file) {
+      avatarUrl = `/uploads/${req.file.filename}`;
+    }
+
+    // Basic validation
+    if (!fullName || !email || !role || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Full name, email, role, and password are required.",
+      });
+    }
+
+    if (!["SUPER_ADMIN", "ADMIN", "TEAM_MEMBER", "CLIENT"].includes(role)) {
+      return res.status(400).json({ success: false, message: "Invalid role specified." });
+    }
+
+    // Check for existing user by email
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(409).json({ success: false, message: "Email already in use." });
+    }
+
+    // Optional: guard phone uniqueness if provided
+    if (phone) {
+      const phoneInUse = await User.findOne({ phone });
+      if (phoneInUse) {
+        return res.status(409).json({ success: false, message: "Phone already in use." });
+      }
+    }
+
+    // Parse birthDate if provided
+    const parsedBirthDate = parseBirthDate(birthDate);
+
+    // Hash password
+    const hashedPassword = await User.hashPassword(password);
+
+    // Create and save user
+    const newUser = new User({
+      fullName,
+      email,
+      phone,
+      city,
+      state,
+      role,
+      subCompany: subCompanyId,
+      passwordHash: hashedPassword,
+      avatarUrl,
+      birthDate: parsedBirthDate, // ✅ store
+    });
+
+    const savedUser = await newUser.save();
+
+    return res.status(201).json({
+      success: true,
+      message: "User registered successfully.",
+      userId: savedUser._id,
+      avatar: avatarUrl,
+      birthDate: savedUser.birthDate, // optional to return
+    });
+  } catch (err) {
+    console.error("Registration error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error during registration.",
+      error: err.message,
+    });
+  }
+};
 
 export const loginUser = async (req, res) => {
   try {
@@ -255,21 +264,15 @@ export const updateTeamMember = async (req, res) => {
     const { id } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid team member ID.",
-      });
+      return res.status(400).json({ success: false, message: "Invalid team member ID." });
     }
 
     const existingMember = await User.findOne({ _id: id, role: "TEAM_MEMBER" }).select("+passwordHash");
     if (!existingMember) {
-      return res.status(404).json({
-        success: false,
-        message: "Team member not found.",
-      });
+      return res.status(404).json({ success: false, message: "Team member not found." });
     }
 
-    const { fullName, email, phone, city, state, subCompany, password, role } = req.body;
+    const { fullName, email, phone, city, state, subCompany, password, role, birthDate } = req.body;
 
     // 🧩 Avatar upload
     let avatarUrl = existingMember.avatarUrl;
@@ -277,21 +280,39 @@ export const updateTeamMember = async (req, res) => {
       avatarUrl = `/uploads/${req.file.filename}`;
     }
 
-    // 🧩 Update password if provided, else keep old one
+    // 🧩 Optional uniqueness checks if email/phone change
+    if (email && email !== existingMember.email) {
+      const emailInUse = await User.findOne({ email });
+      if (emailInUse) {
+        return res.status(409).json({ success: false, message: "Email already in use." });
+      }
+    }
+    if (phone && phone !== existingMember.phone) {
+      const phoneInUse = await User.findOne({ phone });
+      if (phoneInUse) {
+        return res.status(409).json({ success: false, message: "Phone already in use." });
+      }
+    }
+
+    // 🔐 Update password if provided
     let passwordHash = existingMember.passwordHash;
     if (password && password.trim().length > 0) {
       passwordHash = await User.hashPassword(password);
     }
 
+    // 🗓️ Parse birthDate (accepts empty to unset)
+    const parsedBirthDate = birthDate === "" ? null : parseBirthDate(birthDate);
+
     // 🧩 Update fields
-    existingMember.fullName = fullName || existingMember.fullName;
-    existingMember.email = email || existingMember.email;
-    existingMember.phone = phone || existingMember.phone;
-    existingMember.city = city || existingMember.city;
-    existingMember.state = state || existingMember.state;
-    existingMember.subCompany = subCompany || existingMember.subCompany;
+    if (fullName) existingMember.fullName = fullName;
+    if (email) existingMember.email = email;
+    if (phone) existingMember.phone = phone;
+    if (city) existingMember.city = city;
+    if (state) existingMember.state = state;
+    if (typeof parsedBirthDate !== "undefined") existingMember.birthDate = parsedBirthDate;
+    if (subCompany) existingMember.subCompany = subCompany;
     existingMember.avatarUrl = avatarUrl;
-    existingMember.passwordHash = passwordHash; // 🟢 Always set it
+    existingMember.passwordHash = passwordHash;
     if (role) existingMember.role = role;
 
     const updatedMember = await existingMember.save();
@@ -311,7 +332,6 @@ export const updateTeamMember = async (req, res) => {
   }
 };
 
-
 export const updateSuperAdmin = async (req, res) => {
   try {
     const { id } = req.params;
@@ -325,12 +345,26 @@ export const updateSuperAdmin = async (req, res) => {
       return res.status(404).json({ success: false, message: "Super Admin not found." });
     }
 
-    const { fullName, email, phone, city, state, password, role } = req.body;
+    const { fullName, email, phone, city, state, password, role, birthDate } = req.body;
 
-    // 🧾 Handle avatar upload
+    // 🧾 Avatar upload
     let avatarUrl = existingSuperAdmin.avatarUrl;
     if (req.file) {
       avatarUrl = `/uploads/${req.file.filename}`;
+    }
+
+    // Optional uniqueness checks if email/phone change
+    if (email && email !== existingSuperAdmin.email) {
+      const emailInUse = await User.findOne({ email });
+      if (emailInUse) {
+        return res.status(409).json({ success: false, message: "Email already in use." });
+      }
+    }
+    if (phone && phone !== existingSuperAdmin.phone) {
+      const phoneInUse = await User.findOne({ phone });
+      if (phoneInUse) {
+        return res.status(409).json({ success: false, message: "Phone already in use." });
+      }
     }
 
     // 🔐 Handle password update
@@ -339,12 +373,16 @@ export const updateSuperAdmin = async (req, res) => {
       passwordHash = await User.hashPassword(password);
     }
 
+    // 🗓️ Parse birthDate
+    const parsedBirthDate = birthDate === "" ? null : parseBirthDate(birthDate);
+
     // 🧩 Update fields
-    existingSuperAdmin.fullName = fullName || existingSuperAdmin.fullName;
-    existingSuperAdmin.email = email || existingSuperAdmin.email;
-    existingSuperAdmin.phone = phone || existingSuperAdmin.phone;
-    existingSuperAdmin.city = city || existingSuperAdmin.city;
-    existingSuperAdmin.state = state || existingSuperAdmin.state;
+    if (fullName) existingSuperAdmin.fullName = fullName;
+    if (email) existingSuperAdmin.email = email;
+    if (phone) existingSuperAdmin.phone = phone;
+    if (city) existingSuperAdmin.city = city;
+    if (state) existingSuperAdmin.state = state;
+    if (typeof parsedBirthDate !== "undefined") existingSuperAdmin.birthDate = parsedBirthDate;
     existingSuperAdmin.avatarUrl = avatarUrl;
     existingSuperAdmin.passwordHash = passwordHash;
     if (role) existingSuperAdmin.role = role;

@@ -12,6 +12,7 @@ const UserSchema = new mongoose.Schema({
     subCompany: { type: mongoose.Schema.Types.ObjectId, ref: "SubCompany",required : false , default:null}, // for employees if tied to a brand
     passwordHash: { type: String, required: true, select: false },
     avatarUrl: { type: String },
+    birthDate: { type: Date },
      isEmailVerified: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
     lastLoginAt: Date,

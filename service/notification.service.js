@@ -1,6 +1,8 @@
 // src/services/notification.service.js
 import User from "../Models/userSchema.js";
 import { sendToTokens, dropInvalidTokens } from "./push.service.js";
+import { saveNotificationsForUsers } from "../utils/saveNotification.js";
+
 
 /** Collect unique FCM tokens for given users */
 export async function getUserTokens(userIds = []) {
@@ -70,4 +72,71 @@ export async function pushToUsers({ userIds, title, body, data = {} }) {
   }
 
   return resp;
+}
+
+export function leadConvertedTitle(lead, client) {
+  // Prefer clientId/token as "code" if available
+  const code = client?.clientId || lead?.token || "";
+  const display = [lead?.name, code].filter(Boolean).join(" • ");
+  return `Lead converted to client${display ? `: ${display}` : ""}`;
+}
+
+export function leadConvertedBody(lead, client) {
+  const lines = [];
+  if (client?.clientId) lines.push(`Client Code: ${client.clientId}`);
+  if (lead?.phone) lines.push(`Phone: ${lead.phone}`);
+  if (lead?.businessName) lines.push(`Business: ${lead.businessName}`);
+  if (lead?.businessCategory) lines.push(`Category: ${lead.businessCategory}`);
+  return lines.join("\n") || "A lead has been converted to a client.";
+}
+
+/**
+ * Notify ALL users when a lead is converted to a client.
+ * - Saves Notification documents for each user
+ * - Sends FCM push to all devices
+ * Pass actorId if you want to *exclude* the converter (optional).
+ */
+export async function notifyAllUsersLeadConverted({ lead, client, actorId = null }) {
+  // 1) Get all users (you can filter by active=true if your schema has it)
+  const allUsers = await User.find({}, { _id: 1 }).lean();
+  let userIds = allUsers.map(u => u._id);
+
+  // Optional: exclude the user who performed the action
+  if (actorId) {
+    const a = String(actorId);
+    userIds = userIds.filter(id => String(id) !== a);
+  }
+
+  if (!userIds.length) return;
+
+  // 2) Build notification content
+  const title = leadConvertedTitle(lead, client);
+  const body = leadConvertedBody(lead, client);
+
+  // 3) Persist notifications for in-app center
+  await saveNotificationsForUsers({
+    userIds,
+    title,
+    message: body,
+    type: "lead_converted",
+  });
+
+  // 4) Push to devices
+  await pushToUsers({
+    userIds,
+    title,
+    body,
+    data: {
+      type: "lead_converted",
+      leadId: String(lead?._id || ""),
+      clientId: String(client?._id || ""),
+      clientCode: String(client?.clientId || ""),
+      // Optional fields apps often use to deep-link:
+      screen: "client_details",
+      params: JSON.stringify({
+        clientId: String(client?._id || ""),
+        leadId: String(lead?._id || ""),
+      }),
+    },
+  });
 }

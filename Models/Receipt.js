@@ -1,7 +1,9 @@
 import mongoose from "mongoose";
 
 const ReceiptSchema = new mongoose.Schema({
-  receiptNo: { type: String, required: true }, // e.g. RUD-001
+    // strictly increasing global sequence
+  seq: { type: Number, required: true, unique: true, index: true },
+  receiptNo: { type: String, required: true,unique: true , index: true  }, // e.g. RUD-001
   receiptDate: { type: Date, default: Date.now },
 
   client: { type: mongoose.Schema.Types.ObjectId, ref: "Client", required: true },
@@ -16,6 +18,8 @@ const ReceiptSchema = new mongoose.Schema({
 
   pdfUrl: { type: String },
 }, { timestamps: true });
+
+ReceiptSchema.index({ invoice: 1, createdAt: -1 });
 
 const Receipt = mongoose.model("Receipt", ReceiptSchema);
 export default Receipt;

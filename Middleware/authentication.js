@@ -92,6 +92,7 @@ export default function auth(req, res, next) {
   try {
     const header = req.headers["authorization"] || "";
     const cookieToken = req.cookies?.auth_token;
+     req.userDeviceToken = req.headers['x-device-token'] || null;
 
     // Accept JWT from:
     // 1) Authorization: Bearer <token>

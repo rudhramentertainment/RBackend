@@ -4,6 +4,9 @@ import SubCompany from "../Models/SubCompany.js";
 import DriveFolder from "../Models/DriveFolder.js";
 import mongoose from "mongoose";
 import { sendLeadEmail } from '../utils/emailService.js';
+import {
+  notifyAllUsersLeadConverted
+} from "../service/notification.service.js";
 
 // 🟢 Add Lead
 export const addLead = async (req, res) => {
@@ -417,7 +420,19 @@ export const convertLeadToClient = async (req, res) => {
       }
     }
 
-    // 9️⃣ Send success response
+    // 🔟 NEW: Fire notifications (push + DB) to ALL users
+    try {
+      await notifyAllUsersLeadConverted({
+        lead,
+        client: newClient,
+        actorId: userId, // optional: exclude the converter from notification
+      });
+    } catch (notifyErr) {
+      console.warn("convertLeadToClient => notifyAllUsersLeadConverted failed:", notifyErr);
+      // Do not fail the main request if notifications fail
+    }
+
+    // 1️⃣1️⃣ Send success response
     res.status(201).json({
       success: true,
       message: "Lead successfully converted to client with sub-company IDs and folders created.",

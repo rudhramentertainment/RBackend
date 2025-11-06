@@ -6,6 +6,8 @@ import Client from "../Models/Client.js";
 import cron from "node-cron";
 import User from "../Models/userSchema.js";
 import { sendToTokens ,dropInvalidTokens } from "../service/push.service.js";
+import { saveNotificationsForUsers } from "../utils/saveNotification.js";
+
 
 // Helper function to share meeting details (simulate SMS)
 const shareMeetingDetails = async (phone, meeting) => {
@@ -178,6 +180,13 @@ export const addMeeting = async (req, res) => {
             title,
           },
         });
+        await saveNotificationsForUsers({
+  userIds: [ids.organizer, ...ids.participants],
+  title: "📅 New Meeting Scheduled",
+  message: `${title} • ${start.toLocaleString()}`,
+  type: "meeting"
+});
+
 
         console.log('addMeeting => FCM result', {
           successCount: resp.successCount,

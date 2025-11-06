@@ -10,6 +10,7 @@ import {
   taskAssignTitle,
   taskAssignBody,
 } from "../service/notification.service.js";
+import { saveNotificationsForUsers } from "../utils/saveNotification.js";
  
 export const addTask = async (req, res) => {
   try {
@@ -127,6 +128,13 @@ export const addTask = async (req, res) => {
       deadline: task.deadline ? String(task.deadline) : "",
     },
   });
+
+  await saveNotificationsForUsers({
+  userIds: allAssignees,
+  title: taskAssignTitle(task),
+  message: taskAssignBody(task, task.deadline),
+  type: "task"
+});
 }
 
     return res.status(201).json({
@@ -218,6 +226,12 @@ if (newlyAdded.length) {
       deadline: updatedTask.deadline ? String(updatedTask.deadline) : "",
     },
   });
+  await saveNotificationsForUsers({
+  userIds: newlyAdded,
+  title: taskAssignTitle(updatedTask),
+  message: taskAssignBody(updatedTask, updatedTask.deadline),
+  type:"task"
+});
 }
 
     return res.status(200).json({

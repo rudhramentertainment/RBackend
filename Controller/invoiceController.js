@@ -8,6 +8,7 @@ import SubCompany from "../Models/SubCompany.js";
 import mongoose from "mongoose";
 import puppeteer from "puppeteer";
 import { executablePath } from "puppeteer";
+import { sendInvoiceEmail } from "../utils/emailService.js";
 
 function numberToWords(num) {
   if (num == null || isNaN(num)) return "Zero Rupees";
@@ -38,6 +39,66 @@ function firstLine(s) {
   return String(s).split(/\r?\n/)[0].slice(0, 120);
 }
 
+function escapeRegExp(s = "") {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+
+async function allocateInvoiceNumber({ client, subCompany }) {
+  // Get all invoices of this pair sorted oldest -> newest (lightweight select)
+  const pairInvoices = await Invoice.find({
+    client: client._id,
+    subCompany: subCompany._id,
+  })
+    .select("invoiceNo createdAt")
+    .sort({ createdAt: 1 })
+    .lean();
+
+  // If no invoice exists for this pair, bump subCompany counter and issue new base.
+  if (pairInvoices.length === 0) {
+    const updatedSc = await SubCompany.findByIdAndUpdate(
+      subCompany._id,
+      { $inc: { currentInvoiceCount: 1 } },
+      { new: true }
+    ).lean();
+
+    const paddedCount = String(Number(updatedSc.currentInvoiceCount)).padStart(
+      3,
+      "0"
+    );
+    const prefix =
+      updatedSc.prefix ||
+      ((client.subCompanyTitlesNo || [])[0]) ||
+      "PAN";
+
+    const invoiceBase = `${prefix}-${paddedCount}`;
+    return { invoiceNo: invoiceBase, invoiceBase, bumpedCounter: true };
+  }
+
+  // There are existing invoices – keep the base of the oldest invoice.
+  const firstNo = pairInvoices[0].invoiceNo || "";
+  const m = firstNo.match(/^([A-Za-z]+-\d+)/); // "JOG-006"
+  const invoiceBase = m ? m[1] : firstNo.split(/\s*\(/)[0].trim();
+
+  // Find highest suffix used so far for this base
+  const baseRe = new RegExp(
+    `^${escapeRegExp(invoiceBase)}(?:\\s*\\((\\d+)\\))?$`
+  );
+
+  let maxSuffix = 0;
+  for (const inv of pairInvoices) {
+    const mm = (inv.invoiceNo || "").match(baseRe);
+    if (mm) {
+      const n = mm[1] ? parseInt(mm[1], 10) : 0; // bare base counts as 0
+      if (!isNaN(n)) maxSuffix = Math.max(maxSuffix, n);
+    }
+  }
+
+  const nextSuffix = maxSuffix + 1;
+  const invoiceNo = `${invoiceBase} (${nextSuffix})`;
+  return { invoiceNo, invoiceBase, bumpedCounter: false };
+}
+
 export const generateInvoicePDF = async (req, res) => {
   try {
     const {
@@ -46,7 +107,7 @@ export const generateInvoicePDF = async (req, res) => {
       items = [],
       dueDate,
       notes = "",
-      includeGst = true
+      includeGst = true,
     } = req.body;
 
     // === Lookup client (ObjectId or business code) ===
@@ -60,8 +121,8 @@ export const generateInvoicePDF = async (req, res) => {
           { clientId: rawClientId },
           { clientCode: rawClientId },
           { businessId: rawClientId },
-          { email: rawClientId }
-        ]
+          { email: rawClientId },
+        ],
       }).lean();
     }
 
@@ -71,53 +132,48 @@ export const generateInvoicePDF = async (req, res) => {
       subCompany = await SubCompany.findById(subCompanyId).lean();
     }
     if (!subCompany && subCompanyId) {
-      subCompany = await SubCompany.findOne({ _id: subCompanyId }).lean().catch(() => null);
+      subCompany = await SubCompany.findOne({ _id: subCompanyId })
+        .lean()
+        .catch(() => null);
     }
 
     if (!client || !subCompany) {
-      return res.status(404).json({ message: "Client or Sub-company not found" });
+      return res
+        .status(404)
+        .json({ message: "Client or Sub-company not found" });
     }
 
-    // === Invoice number (increment on subCompany) ===
-    const scDoc = await SubCompany.findById(subCompany._id);
-    scDoc.currentInvoiceCount = (Number(scDoc.currentInvoiceCount) || 0) + 1;
-    const paddedCount = String(scDoc.currentInvoiceCount).padStart(3, "0");
-    const prefix = scDoc.prefix || ((client.subCompanyTitlesNo || [])[0]) || "PAN";
-    const invoiceNo = `${prefix}-${paddedCount}`;
-    await scDoc.save();
-    subCompany = (await SubCompany.findById(scDoc._id).lean());
-
-    // === Normalize incoming items into objects with title + description + qty + rate + amount ===
-    const normalizedItems = (Array.isArray(items) ? items : []).map(i => {
+    // === Normalize items: ensure {title, description, qty, rate, amount} ===
+    const normalizedItems = (Array.isArray(items) ? items : []).map((i) => {
       const title = (i.title ?? i.serviceTitle ?? "").toString().trim();
-      // prefer explicit description; fallback to old `description` or `service`
-      const description = (i.description ?? i.desc ?? i.service ?? "").toString().trim();
+      const description = (i.description ?? i.desc ?? i.service ?? "")
+        .toString()
+        .trim();
       const qty = Number(i.qty) || 0;
       const rate = Number(i.rate) || 0;
       const amount = parseFloat((qty * rate).toFixed(2));
       return {
-        title: title || firstLine(description) || "-", // if no title, use first line of description
+        title: title || firstLine(description) || "-",
         description: description || title || "-",
         qty,
         rate,
-        amount
+        amount,
       };
     });
 
-    const subtotal = parseFloat(normalizedItems.reduce((acc, s) => acc + (s.amount || 0), 0).toFixed(2));
+    const subtotal = parseFloat(
+      normalizedItems
+        .reduce((acc, s) => acc + (s.amount || 0), 0)
+        .toFixed(2)
+    );
     const gstRate = Number(subCompany.gstRate ?? 18);
-    const gstAmount = includeGst ? parseFloat(((subtotal * gstRate) / 100).toFixed(2)) : 0;
+    const gstAmount = includeGst
+      ? parseFloat(((subtotal * gstRate) / 100).toFixed(2))
+      : 0;
     const total = parseFloat((subtotal + gstAmount).toFixed(2));
     const createdAt = new Date();
 
-    // === Paths / ensure folder ===
-    const invoicesDir = path.resolve("invoices");
-    if (!fs.existsSync(invoicesDir)) fs.mkdirSync(invoicesDir, { recursive: true });
-    const fileName = `${invoiceNo}.pdf`;
-    const filePath = path.join(invoicesDir, fileName);
-    const pdfUrl = `/api/invoices/file/${fileName}`;
-
-    // === Helper to embed any local image as data URI ===
+    // === Helper: embed any local image as data URI ===
     function embedLocalImageAsDataUri(possiblePaths) {
       if (!possiblePaths) return null;
       const arr = Array.isArray(possiblePaths) ? possiblePaths : [possiblePaths];
@@ -129,7 +185,7 @@ export const generateInvoicePDF = async (req, res) => {
           path.join(process.cwd(), "public", p),
           path.join(process.cwd(), "assets", p),
           path.join(process.cwd(), "uploads", p),
-          path.join(process.cwd(), p)
+          path.join(process.cwd(), p),
         ];
         for (const c of candidates) {
           try {
@@ -142,7 +198,7 @@ export const generateInvoicePDF = async (req, res) => {
               const base64 = buff.toString("base64");
               return `data:${mime};base64,${base64}`;
             }
-          } catch (err) {
+          } catch {
             continue;
           }
         }
@@ -150,18 +206,39 @@ export const generateInvoicePDF = async (req, res) => {
       return null;
     }
 
-    const mainLogoCandidates = ["logo.png", "/logo.png", "public/logo.png", "assets/logo.png"];
+    const mainLogoCandidates = [
+      "logo.png",
+      "/logo.png",
+      "public/logo.png",
+      "assets/logo.png",
+    ];
     const mainLogoData = embedLocalImageAsDataUri(mainLogoCandidates);
+    const subLogoData = embedLocalImageAsDataUri([
+      subCompany.logoUrl,
+      subCompany.logo,
+      `uploads/${subCompany.logoUrl?.replace(/^\/+/, "")}`,
+    ]);
 
-    const subLogoData = embedLocalImageAsDataUri([subCompany.logoUrl, subCompany.logo, `uploads/${subCompany.logoUrl?.replace(/^\/+/, "")}`]);
+    // === Allocate invoice number according to your rules (with retry on duplicates) ===
+    let invoiceNo, invoiceBase;
+    const maxRetries = 3;
+    let attempt = 0;
 
-    // === Build HTML: show title (bold) and description (small) for each service row ===
-    const html = `
-<!doctype html>
+    async function computeInvoiceNo() {
+      const { invoiceNo: no, invoiceBase: base } = await allocateInvoiceNumber({
+        client,
+        subCompany,
+      });
+      invoiceNo = no;
+      invoiceBase = base;
+    }
+
+    // Build HTML generator that uses current invoiceNo
+    const buildHtml = () => `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>Invoice ${invoiceNo}</title>
+<title>Invoice ${escapeHtml(invoiceNo)}</title>
 <style>
   @page { size: A4; margin: 6mm 6mm; }
   body{font-family: Arial, Helvetica, sans-serif; margin:0; color:#222; -webkit-print-color-adjust:exact;}
@@ -210,23 +287,39 @@ export const generateInvoicePDF = async (req, res) => {
 
       <div class="header">
         <div class="logo-left">
-          ${ mainLogoData ? `<img src="${mainLogoData}" alt="main-logo">` : `<div style="width:100px;height:60px;border:1px solid #eee;"></div>` }
+          ${
+            mainLogoData
+              ? `<img src="${mainLogoData}" alt="main-logo">`
+              : `<div style="width:100px;height:60px;border:1px solid #eee;"></div>`
+          }
         </div>
 
         <div class="center">
-          <div class="name">${escapeHtml(subCompany.name || "Rudhram Entertainment")}</div>
-          <div class="tag">${escapeHtml(subCompany.tagline || "Leading What's Next..!")}</div>
+          <div class="name">${escapeHtml(
+            subCompany.name || "Rudhram Entertainment"
+          )}</div>
+          <div class="tag">${escapeHtml(
+            subCompany.tagline || "Leading What's Next..!"
+          )}</div>
         </div>
 
         <div class="right">
-          <div class="sub-logo">${ subLogoData ? `<img src="${subLogoData}" alt="sub-logo">` : '' }</div>
+          <div class="sub-logo">${
+            subLogoData ? `<img src="${subLogoData}" alt="sub-logo">` : ""
+          }</div>
 
           <div class="meta">
-            <div style="font-size:11px;color:#666">Client ID: <strong>${escapeHtml(client.clientId || client.clientCode || "")}</strong></div>
+            <div style="font-size:11px;color:#666">Client ID: <strong>${escapeHtml(
+              client.clientId || client.clientCode || ""
+            )}</strong></div>
             <div class="invoice-title">INVOICE</div>
             <div>Invoice No: ${escapeHtml(invoiceNo)}</div>
             <div>Date: ${escapeHtml(createdAt.toLocaleDateString())}</div>
-            <div>DUE Date: ${ dueDate ? escapeHtml(new Date(dueDate).toLocaleDateString()) : "-" }</div>
+            <div>DUE Date: ${
+              dueDate
+                ? escapeHtml(new Date(dueDate).toLocaleDateString())
+                : "-"
+            }</div>
           </div>
         </div>
       </div>
@@ -253,40 +346,72 @@ export const generateInvoicePDF = async (req, res) => {
           </tr>
         </thead>
         <tbody>
-          ${normalizedItems.map((s, i) => `
+          ${normalizedItems
+            .map(
+              (s, i) => `
             <tr>
-              <td class="col-sr">${i+1}</td>
+              <td class="col-sr">${i + 1}</td>
               <td class="col-services">
                 <div class="service-title">${escapeHtml(s.title || "-")}</div>
-                <div class="service-desc">${escapeHtml(s.description || "")}</div>
+                <div class="service-desc">${escapeHtml(
+                  s.description || ""
+                )}</div>
               </td>
               <td class="col-qty">${s.qty}</td>
-              <td class="col-rate">₹${Number(s.rate||0).toFixed(2)}</td>
-              <td class="col-amount">₹${Number(s.amount||0).toFixed(2)}</td>
-            </tr>`).join("")}
+              <td class="col-rate">₹${Number(s.rate || 0).toFixed(2)}</td>
+              <td class="col-amount">₹${Number(s.amount || 0).toFixed(2)}</td>
+            </tr>`
+            )
+            .join("")}
         </tbody>
       </table>
 
       <div class="bottom">
         <div class="bank">
           <div style="color:#a36a2c;font-weight:700;margin-bottom:6px">Bank Details</div>
-          <div>Bank Name: ${escapeHtml(subCompany.bankDetails?.bankName || "HDFC Bank")}</div>
-          <div>Account Holder: ${escapeHtml(subCompany.bankDetails?.accountHolder || subCompany.name || "Rudhram Entertainment")}</div>
-          <div>Account Type: ${escapeHtml(subCompany.bankDetails?.accountType || "Current Account")}</div>
-          <div>Account Number: ${escapeHtml(subCompany.bankDetails?.accountNumber || "50200095934904")}</div>
-          <div>IFSC Code: ${escapeHtml(subCompany.bankDetails?.ifscCode || "HDFC0006679")}</div>
-          <div>UPI ID: ${escapeHtml(subCompany.bankDetails?.upiId || "7285833101@hdfcbank")}</div>
+          <div>Bank Name: ${escapeHtml(
+            subCompany.bankDetails?.bankName || "HDFC Bank"
+          )}</div>
+          <div>Account Holder: ${escapeHtml(
+            subCompany.bankDetails?.accountHolder ||
+              subCompany.name ||
+              "Rudhram Entertainment"
+          )}</div>
+          <div>Account Type: ${escapeHtml(
+            subCompany.bankDetails?.accountType || "Current Account"
+          )}</div>
+          <div>Account Number: ${escapeHtml(
+            subCompany.bankDetails?.accountNumber || "50200095934904"
+          )}</div>
+          <div>IFSC Code: ${escapeHtml(
+            subCompany.bankDetails?.ifscCode || "HDFC0006679"
+          )}</div>
+          <div>UPI ID: ${escapeHtml(
+            subCompany.bankDetails?.upiId || "7285833101@hdfcbank"
+          )}</div>
         </div>
 
         <div class="totals">
-          <div class="row"><div>Subtotal</div><div>₹${subtotal.toFixed(2)}</div></div>
-          <div class="row"><div>GST (${includeGst ? gstRate : 0}%)</div><div>₹${gstAmount.toFixed(2)}</div></div>
-          <div class="row total"><div>Total</div><div>₹${total.toFixed(2)}</div></div>
+          <div class="row"><div>Subtotal</div><div>₹${subtotal.toFixed(
+            2
+          )}</div></div>
+          <div class="row"><div>GST (${
+            includeGst ? gstRate : 0
+          }%)</div><div>₹${gstAmount.toFixed(2)}</div></div>
+          <div class="row total"><div>Total</div><div>₹${total.toFixed(
+            2
+          )}</div></div>
         </div>
       </div>
 
-      <div class="amount-words"><strong>Amount in words:</strong> ${escapeHtml(numberToWords(total))} only.</div>
-      ${ notes ? `<div class="notes"><strong>Notes:</strong> ${escapeHtml(notes)}</div>` : "" }
+      <div class="amount-words"><strong>Amount in words:</strong> ${escapeHtml(
+        numberToWords(total)
+      )} only.</div>
+      ${
+        notes
+          ? `<div class="notes"><strong>Notes:</strong> ${escapeHtml(notes)}</div>`
+          : ""
+      }
 
       <div class="terms">
         <div style="color:#a36a2c;font-weight:700;margin-top:8px">Terms & Conditions of Payment</div>
@@ -294,79 +419,149 @@ export const generateInvoicePDF = async (req, res) => {
           1. Payment is due within 7 days of invoice date.<br/>
           2. Late payments may incur a 5% monthly interest fee.<br/>
           3. All prices are exclusive of applicable taxes unless stated otherwise.<br/>
-          <strong>GST : ${escapeHtml(subCompany.gstNumber || "27CYSPG6483K1ZK")}</strong>
+          <strong>GST : ${escapeHtml(
+            subCompany.gstNumber || "27CYSPG6483K1ZK"
+          )}</strong>
         </div>
       </div>
 
       <div class="signature">
         <div class="line"></div>
-        <div>${escapeHtml(subCompany.authorisedSignatory || "Authorised Signatory")}</div>
+        <div>${escapeHtml(
+          subCompany.authorisedSignatory || "Authorised Signatory"
+        )}</div>
       </div>
 
       <div class="footer">
-        ${escapeHtml(subCompany.addressLine1 || "SNS PLATINA, HG1, nr. University Road, Someshwara Enclave, Vesu")} • ${escapeHtml(subCompany.addressLine2 || "Surat, Gujarat 395007")} • ${escapeHtml(subCompany.contactEmail || "info@rudhram.co.in / 6358219521")}
+        ${escapeHtml(
+          subCompany.addressLine1 ||
+            "SNS PLATINA, HG1, nr. University Road, Someshwara Enclave, Vesu"
+        )} • ${escapeHtml(
+      subCompany.addressLine2 || "Surat, Gujarat 395007"
+    )} • ${escapeHtml(
+      subCompany.contactEmail || "info@rudhram.co.in / 6358219521"
+    )}
       </div>
 
     </div>
   </div>
 </body>
-</html>
-    `;
+</html>`;
 
-    // === Render PDF via puppeteer ===
-    const browser = await puppeteer.launch({
-  headless: true,
-  executablePath: executablePath(),
-  args: ["--no-sandbox", "--disable-setuid-sandbox"]
-});
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "networkidle0" });
-    await page.emulateMediaType("screen");
-    await page.pdf({
-      path: filePath,
-      format: "A4",
-      printBackground: true,
-      margin: { top: "6mm", bottom: "10mm", left: "6mm", right: "6mm" }
+    // Prepare output folder
+    const invoicesDir = path.resolve("invoices");
+    if (!fs.existsSync(invoicesDir))
+      fs.mkdirSync(invoicesDir, { recursive: true });
+
+    // Try up to maxRetries to avoid rare duplicate-key races
+    while (attempt < maxRetries) {
+      attempt += 1;
+      await computeInvoiceNo(); // sets invoiceNo & invoiceBase
+
+      // PDF filenames are based on invoiceNo
+      const safeName = invoiceNo.replace(/[^\w\-() ]+/g, "").replace(/\s+/g, " ");
+      const fileName = `${safeName}.pdf`;
+      const filePath = path.join(invoicesDir, fileName);
+      const pdfUrl = `/api/invoices/file/${fileName}`;
+
+      // Render PDF via puppeteer
+      const browser = await puppeteer.launch({
+        headless: true,
+        executablePath: executablePath(),
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      });
+
+      try {
+        const page = await browser.newPage();
+        await page.setContent(buildHtml(), { waitUntil: "networkidle0" });
+        await page.emulateMediaType("screen");
+        await page.pdf({
+          path: filePath,
+          format: "A4",
+          printBackground: true,
+          margin: { top: "6mm", bottom: "10mm", left: "6mm", right: "6mm" },
+        });
+      } finally {
+        await browser.close();
+      }
+
+      // Try to save invoice (unique index on invoiceNo may throw)
+      try {
+        const invoiceDoc = await Invoice.create({
+          invoiceNo,
+          client: client._id,
+          subCompany: subCompany._id,
+          services: normalizedItems.map((s) => ({
+            title: s.title,
+            description: s.description,
+            qty: s.qty,
+            rate: s.rate,
+            amount: s.amount,
+          })),
+          subtotal,
+          gstRate: includeGst ? gstRate : 0,
+          gstAmount,
+          totalAmount: total,
+          invoiceDate: createdAt,
+          dueDate,
+          notes,
+          pdfUrl,
+          status: "Pending",
+        });
+
+        // Email (best-effort; non-blocking for API result)
+        const baseUrl = `${req.protocol}://${req.get("host")}`;
+        const publicUrl = `${baseUrl}${pdfUrl}`;
+        try {
+          await sendInvoiceEmail({
+            client,
+            invoice: invoiceDoc.toObject(),
+            filePath,
+            publicUrl,
+          });
+        } catch (e) {
+          console.warn("⚠️ sendInvoiceEmail failed:", e.message);
+        }
+
+        return res.status(201).json({
+          success: true,
+          message: "Invoice generated successfully",
+          invoiceNo,
+          pdfUrl,
+          invoiceId: invoiceDoc._id,
+        });
+      } catch (err) {
+        // If duplicate key on invoiceNo, loop and try again with a fresh allocation.
+        const isDup =
+          err?.code === 11000 ||
+          /duplicate key/i.test(err?.message || "");
+        if (isDup && attempt < maxRetries) {
+          // Remove the just-created (conflicting) PDF file to keep folder clean
+          try {
+            fs.existsSync(filePath) && fs.unlinkSync(filePath);
+          } catch {}
+          continue; // retry
+        }
+        console.error("Invoice save failed:", err);
+        return res
+          .status(500)
+          .json({ success: false, message: err.message || "Server error" });
+      }
+    }
+
+    // If we exhausted retries (very unlikely)
+    return res.status(500).json({
+      success: false,
+      message:
+        "Could not allocate a unique invoice number after multiple attempts. Please try again.",
     });
-    await browser.close();
-
-    // === Save invoice record (store title + description for each service) ===
-    const invoiceDoc = await Invoice.create({
-      invoiceNo,
-      client: client._id,
-      subCompany: subCompany._id,
-      services: normalizedItems.map(s => ({
-        title: s.title,
-        description: s.description,
-        qty: s.qty,
-        rate: s.rate,
-        amount: s.amount
-      })),
-      subtotal,
-      gstRate: includeGst ? gstRate : 0,
-      gstAmount,
-      totalAmount: total,
-      invoiceDate: createdAt,
-      dueDate,
-      notes,
-      pdfUrl,
-      status: "Pending"
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: "Invoice generated successfully",
-      invoiceNo,
-      pdfUrl,
-      invoiceId: invoiceDoc._id
-    });
-
   } catch (err) {
     console.error("Invoice generation failed:", err);
-    return res.status(500).json({ success: false, message: err.message || "Server error" });
+    return res
+      .status(500)
+      .json({ success: false, message: err.message || "Server error" });
   }
 };
-
 export const getAllInvoices = async (req, res) => {
   try {
     const invoices = await Invoice.find()
