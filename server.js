@@ -23,11 +23,16 @@ import messageRoutes from './Routes/messageRoutes.js';
 // import './cron/meetingReminder.cron.js';
 import { registerTaskReminderCron } from "./jobs/taskReminders.cron.js";
 import { scheduleBirthdayJob } from "./jobs/birthdayNotifier.js";
+import http from 'http';
 
+import { initSocket } from "./socket.js";
 
 
 
 let app = express();
+const server = http.createServer(app);
+const io = initSocket(server, { corsOrigin: "*" });
+app.set("io", io);
 
 dotenv.config({ path: './.env/.env' });
 
@@ -75,6 +80,12 @@ app.use((err, req, res, next) => {
     message: err.message || "Internal server error",
   });
 });
+
+app.use((req, _res, next) => {
+  req.io = io;
+  next();
+});
+
 
 registerTaskReminderCron();
 scheduleBirthdayJob();

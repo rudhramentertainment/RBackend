@@ -4,49 +4,32 @@ import path from "path";
 import mongoose from "mongoose";
 
 const GROUP_KEY = "RUDHRAM";
-
-// helper: URL for a saved file
 const fileUrl = (req, filename) =>
   `${req.protocol}://${req.get("host")}/uploads/chat/${filename}`;
 
-// ---------- SEND DIRECT (text + files) ----------
-// ---------- SEND DIRECT (text + files) ----------
+// ---------- SEND DIRECT ----------
 export const sendMessage = async (req, res) => {
   try {
-    const { message = "", receivers } = req.body;
+    const { message = "", receivers, clientId } = req.body;
 
-    // 1) Normalize receivers to an array of string ids
+    // ---- normalize receivers (keeps your robust logic) ----
     let raw = receivers;
-
-    // If multer gave us a stringified JSON, parse it.
     if (typeof raw === "string") {
-      // case-1: raw is '["id1","id2"]'
       try {
-        const parsed = JSON.parse(raw);
-        raw = parsed;
+        raw = JSON.parse(raw);               // '["id1","id2"]'
       } catch {
-        // case-2: raw is "id1,id2" or "id1"
-        raw = raw.split(",").map(s => s.trim()).filter(Boolean);
+        raw = raw.split(",").map(s => s.trim()).filter(Boolean); // "id1,id2"
       }
     }
-
-    // case-3: raw is ["[\"id1\",\"id2\"]"] (array with single JSON string)
     if (Array.isArray(raw) && raw.length === 1 && typeof raw[0] === "string" && raw[0].trim().startsWith("[")) {
-      try {
-        raw = JSON.parse(raw[0]);
-      } catch {
-        // leave as-is
-      }
+      try { raw = JSON.parse(raw[0]); } catch {}
     }
-
     if (!Array.isArray(raw) || raw.length === 0) {
       return res.status(400).json({ success: false, message: "receivers required" });
     }
-
-    // dedupe & sanitize
     const receiverIds = [...new Set(raw.map(String).filter(Boolean))];
 
-    // 2) Build attachments (unchanged)
+    // ---- attachments ----
     const attachments = (req.files || []).map((f) => ({
       url: fileUrl(req, path.basename(f.path)),
       name: f.originalname,
@@ -61,7 +44,7 @@ export const sendMessage = async (req, res) => {
       kind = isAllImages ? "image" : "file";
     }
 
-    // 3) Create message
+    // ---- create message ----
     const doc = await Message.create({
       sender: req.user.userId,
       receivers: receiverIds,
@@ -69,16 +52,36 @@ export const sendMessage = async (req, res) => {
       attachments,
       kind,
       channel: "direct",
+      // store clientId so the frontend can replace the optimistic bubble
+      ...(clientId ? { clientId } : {}),
     });
 
     await doc.populate("sender", "fullName avatarUrl role");
+    // you can also populate receivers if you need
+
+    // ---- emit via socket.io ----
+    const io = req.app.get("io");              // <<<<<< THIS FIXES 'io is undefined'
+    if (io) {
+      const payload = {
+        type: "direct",
+        message: doc.toObject(),
+      };
+
+      // emit to sender (in case they have other tabs)
+      io.to(`user:${req.user.userId}`).emit("message:new", payload);
+
+      // emit to each receiver
+      receiverIds.forEach((rid) => {
+        io.to(`user:${rid}`).emit("message:new", payload);
+      });
+    }
+
     return res.status(201).json({ success: true, data: doc });
   } catch (err) {
     console.warn("sendMessage error:", err);
     return res.status(500).json({ success: false, message: err.message });
   }
 };
-
 
 // ---------- LIST MY MESSAGES (inbox view) ----------
 export const getMyMessages = async (req, res) => {
@@ -187,7 +190,7 @@ export const deleteThread = async (req, res) => {
 // ---------- GROUP ----------
 export const sendGroupMessage = async (req, res) => {
   try {
-    const { message = "" } = req.body;
+    const { message = "", clientId } = req.body;
 
     const attachments = (req.files || []).map((f) => ({
       url: fileUrl(req, path.basename(f.path)),
@@ -211,16 +214,25 @@ export const sendGroupMessage = async (req, res) => {
       channel: "group",
       groupKey: GROUP_KEY,
       receivers: [],
+      ...(clientId ? { clientId } : {}),
     });
 
     await doc.populate("sender", "fullName avatarUrl role");
+
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`group:${GROUP_KEY}`).emit("message:new", {
+        type: "group",
+        message: doc.toObject(),
+      });
+    }
+
     return res.status(201).json({ success: true, data: doc });
   } catch (err) {
     console.error("sendGroupMessage error:", err);
     return res.status(500).json({ success: false, message: err.message });
   }
 };
-
 export const getGroupMessages = async (req, res) => {
   try {
     const docs = await Message.find({ channel: "group", groupKey: GROUP_KEY })
