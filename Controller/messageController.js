@@ -60,21 +60,26 @@ export const sendMessage = async (req, res) => {
     // you can also populate receivers if you need
 
     // ---- emit via socket.io ----
-    const io = req.app.get("io");              // <<<<<< THIS FIXES 'io is undefined'
-    if (io) {
-      const payload = {
-        type: "direct",
-        message: doc.toObject(),
-      };
+    const io = req.app.get("io");
+if (io) {
+  const payload = {
+    type: "direct",
+    message: doc.toObject(),
+  };
 
-      // emit to sender (in case they have other tabs)
-      io.to(`user:${req.user.userId}`).emit("message:new", payload);
+  console.log("🔴 SOCKET EMIT DIRECT");
+  console.log(" Sender:", req.user.userId);
+  console.log(" Receivers:", receiverIds);
+  console.log(" Payload ID:", payload.message._id);
 
-      // emit to each receiver
-      receiverIds.forEach((rid) => {
-        io.to(`user:${rid}`).emit("message:new", payload);
-      });
-    }
+  io.to(`user:${req.user.userId}`).emit("message:new", payload);
+  receiverIds.forEach((rid) => {
+    io.to(`user:${rid}`).emit("message:new", payload);
+  });
+} else {
+  console.log("❌ SOCKET IO NOT INIT");
+}
+
 
     return res.status(201).json({ success: true, data: doc });
   } catch (err) {

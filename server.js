@@ -96,9 +96,12 @@ const startServer = async () => {
     console.log("✅ Database connected successfully");
 
     const PORT = process.env.PORT || 9000;
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`🚀 Server is running on http://0.0.0.0:${PORT}`);
+
+    // IMPORTANT  ✅ don't use app.listen, use server.listen because socket.io is attached to server
+    server.listen(PORT, "0.0.0.0", () => {
+      console.log(`🚀 HTTP + SOCKET Server running on http://0.0.0.0:${PORT}`);
     });
+
   } catch (error) {
     console.error("❌ Error connecting to MongoDB:", error.message);
     process.exit(1);
@@ -106,4 +109,5 @@ const startServer = async () => {
 };
 
 startServer();
+
 
