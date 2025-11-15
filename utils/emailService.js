@@ -17,6 +17,21 @@ const SMTP_CONFIG = {
 
 };
 
+const SMTP_CONFIG2 = {
+  host: 'smtp.hostinger.com',
+  port: 465,
+  secure: true,
+  auth: {
+    user: 'no-reply@rudhramentertainment.com',
+    pass: 'Rudhr@m0606' // app password
+  },
+   connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 15000,
+
+};
+
+
 let transporter;
 try {
   transporter = nodemailer.createTransport(SMTP_CONFIG);
@@ -212,10 +227,11 @@ export async function sendLeadEmail(lead) {
 
     const html = generateLeadEmailTemplate(lead);
     const mailOptions = {
-      from: `"Rudhram Entertainment" <${SMTP_CONFIG.auth.user}>`,
+      from: `"Rudhram Entertainment" <${SMTP_CONFIG2.auth.user}>`,
       to: lead.email,
       subject: `🎯 Rudhram: Inquiry Received — Ref ${lead.token || ''}`,
-      html
+      html,
+      envelope: { from: SMTP_CONFIG.auth.user, to: lead.email },
     };
 
     const send = util.promisify(transporter.sendMail.bind(transporter));
