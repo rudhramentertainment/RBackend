@@ -51,6 +51,7 @@ const leadSchema = new mongoose.Schema(
     assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     fcmToken: { type: String },
     logs: [leadLogSchema],
+     clientCreatedAtIST: { type: String, default: null },
   },
   { timestamps: true }
 );

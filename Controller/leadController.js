@@ -9,12 +9,12 @@ import {
 } from "../service/notification.service.js";
 
 // 🟢 Add Lead
+// Replace your current addLead function with the following.
+// Adjust import paths as needed at top of file.
+
 export const addLead = async (req, res) => {
   try {
-    console.log("📥 Received lead creation/update request:", {
-      body: req.body,
-      user: req.user ? req.user.fullName : "No user",
-    });
+    console.log("📥 Received lead request:", { body: req.body, user: req.user?.fullName || "No user" });
 
     const {
       source,
@@ -32,59 +32,61 @@ export const addLead = async (req, res) => {
       anniversaryDate,
       companyEstablishDate,
       project_details,
+      clientCreatedAt,      // expected ISO string from frontend
+      clientCreatedAtIST,   // expected human-friendly IST string
     } = req.body;
 
     if (!name || !phone) {
-      console.log("❌ Validation failed: Name and phone are required");
-      return res.status(400).json({
-        success: false,
-        message: "Name and phone number are required.",
-      });
+      return res.status(400).json({ success: false, message: "Name and phone number are required." });
     }
 
-    // 🔍 Check if lead already exists (by name/email/phone)
+    // find existing lead by unique identifiers
     const existingLead = await Lead.findOne({
-      $or: [
-        { email: email || null },
-        { phone: phone || null },
-        { name: name },
-      ],
+      $or: [{ email: email || null }, { phone: phone || null }, { name: name }],
     });
 
     let lead;
     let isNewLead = false;
 
     if (existingLead) {
+      // --- Update path (do not overwrite createdAt) ---
       console.log("🔁 Existing lead found:", existingLead._id);
 
-      // Merge chosen services without duplicates
-      const updatedServices = Array.from(
-        new Set([...(existingLead.chosenServices || []), ...chosenServices])
-      );
+      // Merge chosenServices without duplicates (safe dedupe)
+      const combined = [...(existingLead.chosenServices || []), ...chosenServices];
+      const uniqueServices = [];
+      const seen = new Set();
+      combined.forEach((item) => {
+        try {
+          const key = typeof item === 'string' ? item : JSON.stringify(item);
+          if (!seen.has(key)) {
+            seen.add(key);
+            uniqueServices.push(item);
+          }
+        } catch {
+          uniqueServices.push(item);
+        }
+      });
 
-      // Merge sub-company IDs (avoid duplicates)
-      const updatedSubCompanies = Array.from(
-        new Set([...(existingLead.subCompanyIds || []), ...subCompanyIds])
-      );
+      // Merge subCompanyIds
+      const updatedSubCompanies = Array.from(new Set([...(existingLead.subCompanyIds || []), ...subCompanyIds]));
 
-      // Update lead fields
+      // Update fields (preserve createdAt)
       existingLead.source = source || existingLead.source;
       existingLead.rawForm = rawForm || existingLead.rawForm;
       existingLead.businessName = businessName || existingLead.businessName;
       existingLead.businessCategory = businessCategory || existingLead.businessCategory;
       existingLead.subCompanyIds = updatedSubCompanies;
-      existingLead.chosenServices = updatedServices;
-
-      // ✅ Do NOT change status if lead already exists
-      existingLead.status = existingLead.status;
-
+      existingLead.chosenServices = uniqueServices;
       existingLead.assignedTo = assignedTo || existingLead.assignedTo;
       existingLead.birthDate = birthDate || existingLead.birthDate;
       existingLead.anniversaryDate = anniversaryDate || existingLead.anniversaryDate;
       existingLead.companyEstablishDate = companyEstablishDate || existingLead.companyEstablishDate;
       existingLead.project_details = project_details || existingLead.project_details;
 
-      // Add a log entry
+      // optionally store clientCreatedAtIST as convenience for display (DO NOT change createdAt)
+      if (clientCreatedAtIST) existingLead.clientCreatedAtIST = clientCreatedAtIST;
+
       existingLead.logs.push({
         action: "updated",
         message: `Lead updated by ${req.user?.fullName || "system"}`,
@@ -92,44 +94,62 @@ export const addLead = async (req, res) => {
       });
 
       lead = await existingLead.save();
-      console.log("✅ Lead updated successfully:", lead._id);
+      console.log("✅ Lead updated:", lead._id);
 
-      // 🧩 Sync with Client collection (only if exists)
-      const client = await Client.findOne({ phone: lead.phone });
-      if (client) {
-        console.log("🔁 Updating existing client:", client._id);
-
-        const updatedSubCompanyTitles = Array.from(
-          new Set([...(client.subCompanyTitlesNo || []), ...subCompanyIds])
-        );
-
-        client.name = lead.name;
-        client.email = lead.email;
-        client.businessName = lead.businessName;
-        client.subCompanyTitlesNo = updatedSubCompanyTitles;
-
-        // ✅ Merge chosenServices inside meta
-        client.meta = {
-          ...client.meta,
-          chosenServices: Array.from(
-            new Set([
-              ...(client.meta?.chosenServices || []),
-              ...(lead.chosenServices || []),
-            ])
-          ),
-        };
-
-        await client.save();
-        console.log("✅ Client updated successfully:", client._id);
-      } else {
-        console.log("ℹ️ No existing client found for this lead, skipping client creation.");
+      // sync with client collection if needed (keeps your previous logic)
+      try {
+        const client = await Client.findOne({ phone: lead.phone });
+        if (client) {
+          const updatedSubCompanyTitles = Array.from(new Set([...(client.subCompanyTitlesNo || []), ...subCompanyIds]));
+          client.name = lead.name;
+          client.email = lead.email;
+          client.businessName = lead.businessName;
+          client.subCompanyTitlesNo = updatedSubCompanyTitles;
+          client.meta = {
+            ...client.meta,
+            chosenServices: Array.from(new Set([...(client.meta?.chosenServices || []), ...(lead.chosenServices || [])])),
+          };
+          await client.save();
+        }
+      } catch (err) {
+        console.error("Error syncing client after update:", err);
       }
     } else {
-      // 🆕 Create new lead only
+      // --- Create path ---
       const token = await Lead.generateToken();
-      console.log("🔐 Generated new lead token:", token);
+      console.log("🔐 Generated token:", token);
 
-      const newLead = new Lead({
+      // Parse clientCreatedAt if provided
+      let parsedCreatedAt = null;
+      if (clientCreatedAt) {
+        const tmp = new Date(clientCreatedAt);
+        if (!Number.isNaN(tmp.getTime())) {
+          parsedCreatedAt = tmp;
+        } else {
+          console.warn("⚠️ clientCreatedAt could not be parsed, ignoring:", clientCreatedAt);
+        }
+      }
+
+      // Compute clientCreatedAtIST server-side if not provided but parsedCreatedAt exists
+      let computedClientCreatedAtIST = clientCreatedAtIST || null;
+      if (!computedClientCreatedAtIST && parsedCreatedAt) {
+        try {
+          computedClientCreatedAtIST = parsedCreatedAt.toLocaleString('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true,
+          });
+        } catch (e) {
+          computedClientCreatedAtIST = null;
+        }
+      }
+
+      const newLeadData = {
         token,
         source,
         rawForm,
@@ -140,12 +160,13 @@ export const addLead = async (req, res) => {
         businessCategory,
         subCompanyIds,
         chosenServices,
-        status, // only set status for new lead
+        status: status || "new",
         assignedTo,
         birthDate: birthDate || null,
         anniversaryDate: anniversaryDate || null,
         companyEstablishDate: companyEstablishDate || null,
         project_details: project_details || "",
+        clientCreatedAtIST: computedClientCreatedAtIST,
         logs: [
           {
             action: "created",
@@ -153,51 +174,50 @@ export const addLead = async (req, res) => {
             performedBy: req.user?._id || null,
           },
         ],
-      });
+      };
 
+      // **CRITICAL**: If client supplied a parsable ISO timestamp, set createdAt to that Date
+      if (parsedCreatedAt) {
+        newLeadData.createdAt = parsedCreatedAt;
+      }
+
+      const newLead = new Lead(newLeadData);
       lead = await newLead.save();
       isNewLead = true;
       console.log("💾 New lead saved:", lead._id);
 
-      // ✉️ Send email notification for new lead
+      // send email notification (non-blocking)
       if (lead.email) {
-          try {
-      const leadEmailSent = await sendLeadEmail(lead);
-      console.log('sendLeadEmail result:', leadEmailSent);
-    } catch (err) {
-      console.error('Error sending lead email:', err);
-    }
+        try {
+          await sendLeadEmail(lead);
+        } catch (err) {
+          console.error("Error sending lead email:", err);
+        }
       }
     }
 
+    // non-blocking client notification
     try {
       const client = await Client.findOne({ phone: lead.phone }).lean();
       if (client && client.email) {
-        const clientNotify = await sendClientNotification(client, lead);
-        console.log('sendClientNotification result:', clientNotify);
-      } else {
-        console.log('No client with email found for client notification.');
+        await sendClientNotification(client, lead);
       }
     } catch (err) {
-      console.error('Error sending client notification:', err);
+      console.error("Error sending client notification:", err);
     }
 
-    res.status(200).json({
+    // Return lead as saved by DB (createdAt will reflect parsedCreatedAt if provided)
+    return res.status(200).json({
       success: true,
-      message: isNewLead
-        ? "New lead created successfully."
-        : "Existing lead updated successfully with new services.",
+      message: isNewLead ? "New lead created successfully." : "Existing lead updated successfully.",
       data: lead,
     });
   } catch (error) {
-    console.error("💥 Error in addLead controller:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error while adding/updating lead.",
-      error: error.message,
-    });
+    console.error("💥 addLead error:", error);
+    return res.status(500).json({ success: false, message: "Server error while adding/updating lead.", error: error.message });
   }
 };
+
 
 // Add this route to check for existing leads
 export const checkExistingLead = async (req, res) => {

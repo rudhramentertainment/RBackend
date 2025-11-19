@@ -9,7 +9,7 @@ const SMTP_CONFIG = {
   secure: true,
   auth: {
     user: 'info@rudhramentertainment.com',
-    pass: 'Rudhr@m0606' // app password
+    pass: 'Rudra@123%*' // app password
   },
    connectionTimeout: 10000,
   greetingTimeout: 10000,
@@ -23,7 +23,7 @@ const SMTP_CONFIG2 = {
   secure: true,
   auth: {
     user: 'no-reply@rudhramentertainment.com',
-    pass: 'Rudhr@m0606' // app password
+    pass: 'Rudra@123%*' // app password
   },
    connectionTimeout: 10000,
   greetingTimeout: 10000,
@@ -45,7 +45,7 @@ try {
 } catch (err) {
   console.error('❌ failed creating transporter:', err);
   transporter = null;
-}
+} 
 
 // Colour palette mapped to CSS
 const COLORS = {
@@ -224,7 +224,7 @@ export async function sendLeadEmail(lead) {
       console.error('❌ transporter not available');
       return false;
     }
-
+ 
     const html = generateLeadEmailTemplate(lead);
     const mailOptions = {
       from: `"Rudhram Entertainment" <${SMTP_CONFIG2.auth.user}>`,

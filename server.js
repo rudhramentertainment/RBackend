@@ -29,6 +29,7 @@ import { initSocket } from "./socket.js";
 
 
 
+
 let app = express();
 const server = http.createServer(app);
 const io = initSocket(server, { corsOrigin: "*" });
@@ -89,6 +90,7 @@ app.use((req, _res, next) => {
 
 registerTaskReminderCron();
 scheduleBirthdayJob();
+
 const startServer = async () => {
   try {
     console.log("⏳ Connecting to MongoDB...");

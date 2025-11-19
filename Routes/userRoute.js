@@ -1,22 +1,24 @@
 import express from "express";
-import { deleteTeamMember, getAllMembers, getAllTeamMembers, getTeamMemberDetails, getUserProfile, loginUser, registerInit, registerResendOtp, registerUser, registerVerify, removeDeviceToken, saveFcmToken, updateSuperAdmin, updateTeamMember } from "../Controller/userController.js";
+import { deleteTeamMember, getAllMembers, getAllTeamMembers, getTeamMemberDetails, getUserEmployeeId, getUserProfile, loginUser, registerInit, registerResendOtp, registerUser, registerVerify, removeDeviceToken, restoreTeamMember, saveFcmToken, updateSuperAdmin, updateTeamMember, verifyEmployeeHash } from "../Controller/userController.js";
 import auth, { authenticate, authorize } from "../Middleware/authentication.js";
 import upload from "../Middleware/uploadMiddleware.js";
 import { saveDeviceToken } from "../Controller/device.controller.js";
 import Notification from "../Models/Notification.js";
+import path from "path";
+
 
 const app = express();
 
 
 app.get("/users", getAllMembers);
 
-app.post('/register',upload.single("avatar"),registerUser);
+app.post('/register', upload.fields([{ name: 'avatar', maxCount: 1 }, { name: 'aadhar', maxCount: 1 }]), registerUser);
 app.post('/save-fcm-token', saveFcmToken);
 app.post('/login',loginUser);
 app.get("/me", getUserProfile); 
 app.get("/team-members", getAllTeamMembers); 
 
-app.put("/team-members/:id", upload.single("avatar"), updateTeamMember);
+app.put('/team-members/:id', upload.fields([{ name: 'avatar', maxCount: 1 }, { name: 'aadhar', maxCount: 1 }]), updateTeamMember);
 app.put("/superadmin/:id", upload.single("avatar"), updateSuperAdmin);
 
 app.delete("/team-members/:id", deleteTeamMember);
@@ -24,13 +26,27 @@ app.delete("/team-members/:id", deleteTeamMember);
 app.get('/:teamMemberId/details',getTeamMemberDetails);
 
 //OTP
-app.post("/register-init", upload.single("avatar"), registerInit);
+app.post('/register-init', upload.fields([{ name:'avatar', maxCount:1 }, { name:'aadhar', maxCount:1 }]), registerInit);
+
 
 app.post("/register-verify", registerVerify);
 
 app.post("/register-resend-otp", registerResendOtp);
 
+app.post("/team-members/:id/restore", restoreTeamMember);
 
+
+//qr code
+
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
+
+app.get('/:id/employee-id', getUserEmployeeId);        // public/protected as you prefer
+app.post('/verify-employee-hash', verifyEmployeeHash); // post scanned hash here
+
+// // barcode endpoints (protected)
+// app.get('/:id/barcode', getUserBarcode);
+// app.post('/verify-barcode', verifyBarcode);
 
 
 app.post("/device-token",  saveDeviceToken);
