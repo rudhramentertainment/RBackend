@@ -174,7 +174,7 @@ export async function generateAndSaveIdCard(user, opts = {}) {
         position: absolute;
         left: 50%;
         /* move content lower so avatar sits under the logo curve — tune this number if needed */
-        top: 50%;
+        top: 53%;
         transform: translate(-50%, -40%); /* vertical translate adjusted for top */
         width: 100%;
         display: flex;
@@ -201,9 +201,9 @@ export async function generateAndSaveIdCard(user, opts = {}) {
       .name-box { text-align:center; margin-top: 2px; }
       .fullname {
         margin: 0;
-        font-size: 34px;
+        font-size: 60px;
         color: #7a3d19;
-        font-weight: 800;
+        font-weight:700;
         letter-spacing: 0.6px;
       }
       .subtitle {
@@ -216,8 +216,8 @@ export async function generateAndSaveIdCard(user, opts = {}) {
 
       /* QR - larger and spaced like your second example */
       .qr {
-        width: 220px;
-        height: 220px;
+        width: 250px;
+        height: 250px;
         background: #fff;
         padding: 16px;
         border-radius: 6px;
@@ -232,7 +232,7 @@ export async function generateAndSaveIdCard(user, opts = {}) {
       @media (max-width:420px) {
         .profile { width:180px; height:180px; padding:10px; }
         .fullname { font-size:24px; }
-        .qr { width:160px; height:160px; padding:10px; }
+        .qr { width:160px; height:160px; padding:10px; }    
       }
     </style>
   </head>
@@ -245,7 +245,6 @@ export async function generateAndSaveIdCard(user, opts = {}) {
 
         <div class="name-box">
           <h1 class="fullname">${escapeHtml(user.fullName || '')}</h1>
-          <div class="subtitle">${escapeHtml(prettyRole)}</div>
         </div>
 
         <div class="qr"><img src="${qrUri}" alt="qr" /></div>
@@ -263,36 +262,74 @@ export async function generateAndSaveIdCard(user, opts = {}) {
   const fileName = `${String(user._id).replace(/[^a-zA-Z0-9_-]/g, '')}_${timestamp}.png`;
   const outPath = path.join(absoluteUploadsDir, fileName);
 
-  console.info('[IdCardGen] launching puppeteer...');
-  const browser = await puppeteer.launch({
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    defaultViewport: { width: size.width, height: size.height },
+ console.info('[IdCardGen] launching puppeteer...');
+
+const browser = await puppeteer.launch({
+  headless: true,
+  args: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--disable-http2',                 // prevents ECONNRESET with big images
+    '--disable-features=IsolateOrigins,site-per-process',
+  ],
+  defaultViewport: { width: size.width, height: size.height },
+});
+
+try {
+  const page = await browser.newPage();
+
+  // Stronger timeouts
+  page.setDefaultNavigationTimeout(60000);
+  page.setDefaultTimeout(60000);
+
+  // 1st attempt (networkidle2)
+  try {
+    await page.setContent(html, {
+      waitUntil: 'networkidle2',
+      timeout: 60000
+    });
+  } catch (err) {
+    console.warn('[IdCardGen] networkidle2 failed → retrying domcontentloaded...');
+    // 2nd attempt (fallback)
+    await page.setContent(html, {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000
+    });
+  }
+
+  // WAIT for images (fix large avatar freeze!)
+  await page.evaluate(async () => {
+    const imgs = Array.from(document.images);
+    await Promise.all(
+      imgs.map(img => new Promise(res => {
+        if (img.complete) return res();
+        img.onload = img.onerror = () => res();
+      }))
+    );
   });
 
-  try {
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
+  // small paint delay
+  await new Promise(res => setTimeout(res, 300));
 
-    // Wait for all images to finish loading
-    await page.evaluate(async () => {
-      const imgs = Array.from(document.images || []);
-      await Promise.all(imgs.map(img => {
-        if (img.complete) return Promise.resolve();
-        return new Promise((res) => { img.onload = img.onerror = res; });
-      }));
-    });
+  // capture screenshot
+  await page.screenshot({
+    path: outPath,
+    type: 'png',
+    fullPage: false
+  });
 
-    // ensure paint
-    await new Promise((r) => setTimeout(r, 180));
+  console.info('[IdCardGen] screenshot saved:', outPath);
 
-    await page.screenshot({ path: outPath, type: 'png', fullPage: false });
-    console.info('[IdCardGen] screenshot saved to', outPath);
-  } catch (e) {
-    console.error('[IdCardGen] puppeteer render failed:', e && (e.message || e));
-    throw e;
-  } finally {
-    try { await browser.close(); } catch (_) {}
-  }
+} catch (err) {
+  console.error('[IdCardGen] puppeteer render failed:', err);
+  throw err;
+
+} finally {
+  try { await browser.close(); } catch (e) {}
+}
+
 
   const relative = `/${uploadsDir}/${fileName}`.replace(/\/+/g, '/');
   return relative;

@@ -146,7 +146,7 @@
       const { hash } = req.body;
       if (!hash) return res.status(400).json({ success: false, message: "Missing hash." });
 
-      const user = await User.findOne({ employeeIdHash: hash }).select("fullName email phone city state avatarUrl role employeeId employeeQrUrl isActive");
+      const user = await User.findOne({ employeeIdHash: hash }).select("fullName email phone city state avatarUrl idCardUrl role employeeId employeeQrUrl isActive");
       if (!user) return res.status(404).json({ success: false, message: "Employee not found." });
 
       // Optionally, you can check if archived or inactive
@@ -161,85 +161,95 @@
     }
   };
   export const loginUser = async (req, res) => {
-    try {
-      const { fullName, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-      // 🧩 Validate input
-      if (!fullName || !password) {
-        return res.status(400).json({
-          success: false,
-          message: "Full name and password are required.",
-        });
-      }
-
-      // 🧩 Find user (case-insensitive)
-      const user = await User.findOne({
-        fullName: { $regex: new RegExp(`^${fullName}$`, "i") },
-      }).select("+passwordHash");
-
-      if (!user) {
-        return res.status(401).json({
-          success: false,
-          message: "Invalid name or password.",
-        });
-      }
-
-      // 🧩 Verify password
-      const isMatch = await user.verifyPassword(password);
-      if (!isMatch) {
-        return res.status(401).json({
-          success: false,
-          message: "Invalid name or password.",
-        });
-      }
-
-      // 🧩 Generate JWT Token
-      const token = jwt.sign(
-        { userId: user._id, role: user.role },
-        process.env.JWT_SECRET || "your_jwt_secret",
-        { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
-      );
-
-      // 🧩 Update last login
-      user.lastLoginAt = new Date();
-      await user.save();
-
-      // 🧩 Cookie options
-      const cookieOptions = {
-        httpOnly: true, // ✅ can't be accessed via JS
-        secure: process.env.NODE_ENV === "production", // ✅ HTTPS only in prod
-        sameSite: "Strict",
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-        path: "/", // cookie available for entire site
-      };
-
-      // 🧩 Send cookie + response
-      res
-        .cookie("auth_token", token, cookieOptions)
-        .status(200)
-        .json({
-          success: true,
-          message: "Login successful.",
-          token,
-          user: {
-            id: user._id,
-            fullName: user.fullName,
-            email: user.email,
-            phone: user.phone,
-            role: user.role,
-            subCompany: user.subCompany,
-            avatarUrl: user.avatarUrl,
-          },
-        });
-    } catch (err) {
-      console.error("Login Error:", err);
-      return res.status(500).json({
+    // 🧩 Validate input
+    if (!email || !password) {
+      return res.status(400).json({
         success: false,
-        message: "Server error during login.",
-        error: err.message,
+        message: "Email and password are required.",
       });
     }
-  };
+
+    // 🧩 Find user by email (case-insensitive)
+    const user = await User.findOne({
+      email: { $regex: new RegExp(`^${email}$`, "i") },
+    }).select("+passwordHash");
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password.",
+      });
+    }
+
+    // 🧩 Check if user is archived (block login)
+    if (user.isArchived) {
+      return res.status(403).json({
+        success: false,
+        message: "Your id deactivated. Please contact the administrator.",
+      });
+    }
+
+    // 🧩 Verify password
+    const isMatch = await user.verifyPassword(password);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password.",
+      });
+    }
+
+    // 🧩 Generate JWT Token
+    const token = jwt.sign(
+      { userId: user._id, role: user.role },
+      process.env.JWT_SECRET || "your_jwt_secret",
+      { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
+    );
+
+    // 🧩 Update last login
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    // 🧩 Cookie settings
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "Strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      path: "/",
+    };
+
+    // 🧩 Send response
+    return res
+      .cookie("auth_token", token, cookieOptions)
+      .status(200)
+      .json({
+        success: true,
+        message: "Login successful.",
+        token,
+        user: {
+          id: user._id,
+          fullName: user.fullName,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          subCompany: user.subCompany,
+          avatarUrl: user.avatarUrl,
+          isArchived: user.isArchived,
+        },
+      });
+  } catch (err) {
+    console.error("Login Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error during login.",
+      error: err.message,
+    });
+  }
+};
+
 
   export const getUserProfile = async (req, res) => {
     try {

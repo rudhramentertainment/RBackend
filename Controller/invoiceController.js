@@ -369,26 +369,12 @@ export const generateInvoicePDF = async (req, res) => {
       <div class="bottom">
         <div class="bank">
           <div style="color:#a36a2c;font-weight:700;margin-bottom:6px">Bank Details</div>
-          <div>Bank Name: ${escapeHtml(
-            subCompany.bankDetails?.bankName || "HDFC Bank"
-          )}</div>
-          <div>Account Holder: ${escapeHtml(
-            subCompany.bankDetails?.accountHolder ||
-              subCompany.name ||
-              "Rudhram Entertainment"
-          )}</div>
-          <div>Account Type: ${escapeHtml(
-            subCompany.bankDetails?.accountType || "Current Account"
-          )}</div>
-          <div>Account Number: ${escapeHtml(
-            subCompany.bankDetails?.accountNumber || "50200095934904"
-          )}</div>
-          <div>IFSC Code: ${escapeHtml(
-            subCompany.bankDetails?.ifscCode || "HDFC0006679"
-          )}</div>
-          <div>UPI ID: ${escapeHtml(
-            subCompany.bankDetails?.upiId || "7285833101@hdfcbank"
-          )}</div>
+          <div>Bank Name: HDFC Bank</div>
+          <div>Account Holder: Rudhram Entertainment</div>
+          <div>Account Type: Current Account</div>
+          <div>Account Number: 50200095934904</div>
+          <div>IFSC Code: HDFC0006679</div>
+          <div>UPI ID: 7285833101@hdfcbank</div>
         </div>
 
         <div class="totals">
