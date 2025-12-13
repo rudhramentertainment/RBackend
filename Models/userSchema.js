@@ -22,6 +22,7 @@ const UserSchema = new mongoose.Schema({
   // Soft-delete/archive
   isArchived: { type: Boolean, default: false, index: true },
   passwordChangedAt: { type: Date, default: null },
+  tokenVersion: { type: Number, default: 0 },
   archivedAt: { type: Date, default: null },
   archivedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   archiveReason: { type: String, default: null },

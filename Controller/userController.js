@@ -203,15 +203,13 @@
 
     // 🧩 Generate JWT Token
     const token = jwt.sign(
-      { userId: user._id, role: user.role },
+      { userId: user._id, role: user.role , tokenVersion: user.tokenVersion, },
       process.env.JWT_SECRET || "your_jwt_secret",
       { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
     );
-
     // 🧩 Update last login
     user.lastLoginAt = new Date();
     await user.save();
-
     // 🧩 Cookie settings
     const cookieOptions = {
       httpOnly: true,
@@ -374,6 +372,7 @@ export const getUserProfile = async (req, res) => {
       if (password && password.trim().length > 0) {
         existingSuperAdmin.passwordHash = await User.hashPassword(password);
   existingSuperAdmin.passwordChangedAt = new Date();
+  existingSuperAdmin.tokenVersion += 1;
       }
 
       // 🗓️ Parse birthDate
