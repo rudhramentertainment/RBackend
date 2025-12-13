@@ -15,7 +15,7 @@ app.get("/users", getAllMembers);
 app.post('/register', upload.fields([{ name: 'avatar', maxCount: 1 }, { name: 'aadhar', maxCount: 1 }]), registerUser);
 app.post('/save-fcm-token', saveFcmToken);
 app.post('/login',loginUser);
-app.get("/me", getUserProfile); 
+app.get("/me", auth,getUserProfile); 
 app.get("/team-members", getAllTeamMembers); 
 
 app.put('/team-members/:id', upload.fields([{ name: 'avatar', maxCount: 1 }, { name: 'aadhar', maxCount: 1 }]), updateTeamMember);

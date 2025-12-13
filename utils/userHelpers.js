@@ -63,7 +63,7 @@ export async function generateAndSaveEmployeeQr(user, { content = null, uploadsD
   const timestamp = Date.now();
   const filename = `${user._id}_${timestamp}.png`;
   const filepath = path.join(absoluteDir, filename);
-
+ 
   const qrContent = content || user.employeeIdHash || user.employeeId || '';
 
   // Write PNG file synchronously (QRCode.toFile returns a Promise)

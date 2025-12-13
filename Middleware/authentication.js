@@ -88,36 +88,55 @@ export const authorize = (roles = []) => {
     };
 };
 
-export default function auth(req, res, next) {
+export default async function auth(req, res, next) {
   try {
     const header = req.headers["authorization"] || "";
     const cookieToken = req.cookies?.auth_token;
-     req.userDeviceToken = req.headers['x-device-token'] || null;
 
-    // Accept JWT from:
-    // 1) Authorization: Bearer <token>
-    // 2) Cookie: auth_token
+    req.userDeviceToken = req.headers["x-device-token"] || null;
+
     let token = null;
-
     if (header.startsWith("Bearer ")) token = header.substring(7).trim();
     else if (cookieToken) token = cookieToken;
 
     if (!token) {
-      console.warn("auth middleware => no token in header/cookie");
       return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
     const secret = process.env.JWT_SECRET || "your_jwt_secret";
     const payload = jwt.verify(token, secret);
 
-    // Expecting payload like: { userId, role, iat, exp }
     if (!payload?.userId) {
-      console.warn("auth middleware => decoded but no userId", payload);
       return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
-    req.user = { userId: payload.userId, role: payload.role };
-    return next();
+    // 🔥 LOAD USER FROM DB
+    const user = await User.findById(payload.userId).select(
+      "+passwordChangedAt role"
+    );
+
+    if (!user) {
+      return res.status(401).json({ success: false, message: "User not found" });
+    }
+
+    // 🔥 PASSWORD CHANGE INVALIDATION
+    if (
+      user.passwordChangedAt &&
+      payload.iat * 1000 <= user.passwordChangedAt.getTime()
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "Password changed. Please login again.",
+      });
+    }
+
+    // ✅ Attach safe user info
+    req.user = {
+      userId: user._id,
+      role: user.role,
+    };
+
+    next();
   } catch (e) {
     console.error("auth middleware error:", e.message);
     return res.status(401).json({ success: false, message: "Unauthorized" });

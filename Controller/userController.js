@@ -250,51 +250,31 @@
   }
 };
 
+export const getUserProfile = async (req, res) => {
+  try {
+    // user already verified by auth middleware
+    const user = await User.findById(req.user.userId).select("-passwordHash");
 
-  export const getUserProfile = async (req, res) => {
-    try {
-      // 🧩 Get token from header
-      const authHeader = req.headers.authorization;
-
-      if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return res.status(401).json({
-          success: false,
-          message: "No token provided or invalid format.",
-        });
-      }
-
-      const token = authHeader.split(" ")[1];
-
-      // 🧩 Verify token
-      const decoded = jwt.verify(
-        token,
-        process.env.JWT_SECRET || "your_jwt_secret"
-      );
-
-      // 🧩 Find user by ID
-      const user = await User.findById(decoded.userId).select("-passwordHash");
-
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          message: "User not found.",
-        });
-      }
-
-      // 🧩 Send user data
-      return res.status(200).json({
-        success: true,
-        user,
-      });
-    } catch (err) {
-      console.error("Get user error:", err);
-      return res.status(500).json({
+    if (!user) {
+      return res.status(404).json({
         success: false,
-        message: "Server error while fetching user.",
-        error: err.message,
+        message: "User not found.",
       });
     }
-  };
+
+    return res.status(200).json({
+      success: true,
+      user,
+    });
+  } catch (err) {
+    console.error("Get user error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while fetching user.",
+    });
+  }
+};
+
 
   // ✅ Get all users where role = TEAM_MEMBER
 
@@ -392,7 +372,8 @@
       // 🔐 Handle password update
       let passwordHash = existingSuperAdmin.passwordHash;
       if (password && password.trim().length > 0) {
-        passwordHash = await User.hashPassword(password);
+        existingSuperAdmin.passwordHash = await User.hashPassword(password);
+  existingSuperAdmin.passwordChangedAt = new Date();
       }
 
       // 🗓️ Parse birthDate
@@ -406,7 +387,6 @@
       if (state) existingSuperAdmin.state = state;
       if (typeof parsedBirthDate !== "undefined") existingSuperAdmin.birthDate = parsedBirthDate;
       existingSuperAdmin.avatarUrl = avatarUrl;
-      existingSuperAdmin.passwordHash = passwordHash;
       if (role) existingSuperAdmin.role = role;
 
       const updatedSuperAdmin = await existingSuperAdmin.save();
