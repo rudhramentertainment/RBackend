@@ -93,8 +93,6 @@ export default async function auth(req, res, next) {
     const header = req.headers["authorization"] || "";
     const cookieToken = req.cookies?.auth_token;
 
-    req.userDeviceToken = req.headers["x-device-token"] || null;
-
     let token = null;
     if (header.startsWith("Bearer ")) token = header.substring(7).trim();
     else if (cookieToken) token = cookieToken;
@@ -103,23 +101,28 @@ export default async function auth(req, res, next) {
       return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
-    const secret = process.env.JWT_SECRET || "your_jwt_secret";
-    const payload = jwt.verify(token, secret);
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
 
-    if (!payload?.userId) {
-      return res.status(401).json({ success: false, message: "Unauthorized" });
-    }
-
-    // 🔥 LOAD USER FROM DB
-    const user = await User.findById(payload.userId).select(
-      "+tokenVersion role"
-    );
+    // 🔥 ALWAYS check user first
+    const user = await User.findById(payload.userId)
+      .select("role tokenVersion passwordChangedAt");
 
     if (!user) {
       return res.status(401).json({ success: false, message: "User not found" });
     }
 
-    // 🔥 PASSWORD CHANGE INVALIDATION
+    console.log("AUTH payload.tokenVersion:", payload.tokenVersion);
+    console.log("AUTH DB tokenVersion:", user.tokenVersion);
+
+    // 🔥 TOKEN VERSION CHECK
+    if (payload.tokenVersion !== user.tokenVersion) {
+      return res.status(401).json({
+        success: false,
+        message: "Session expired. Please login again.",
+      });
+    }
+
+    // 🔐 PASSWORD CHANGE CHECK
     if (
       user.passwordChangedAt &&
       payload.iat * 1000 <= user.passwordChangedAt.getTime()
@@ -130,15 +133,14 @@ export default async function auth(req, res, next) {
       });
     }
 
-    // ✅ Attach safe user info
     req.user = {
       userId: user._id,
       role: user.role,
     };
 
     next();
-  } catch (e) {
-    console.error("auth middleware error:", e.message);
+  } catch (err) {
+    console.error("auth middleware error:", err.message);
     return res.status(401).json({ success: false, message: "Unauthorized" });
   }
 }

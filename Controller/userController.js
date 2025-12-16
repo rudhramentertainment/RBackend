@@ -175,7 +175,7 @@
     // 🧩 Find user by email (case-insensitive)
     const user = await User.findOne({
       email: { $regex: new RegExp(`^${email}$`, "i") },
-    }).select("+passwordHash");
+    }).select("+passwordHash +tokenVersion");
 
     if (!user) {
       return res.status(401).json({
@@ -201,6 +201,10 @@
       });
     }
 
+    console.log("LOGIN userId:", user._id.toString());
+console.log("LOGIN tokenVersion (DB):", user.tokenVersion);
+
+
     // 🧩 Generate JWT Token
     const token = jwt.sign(
       { userId: user._id, role: user.role , tokenVersion: user.tokenVersion, },
@@ -218,6 +222,9 @@
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       path: "/",
     };
+
+    const decoded = jwt.decode(token);
+console.log("LOGIN token payload:", decoded);
 
     // 🧩 Send response
     return res
@@ -366,7 +373,6 @@ export const getUserProfile = async (req, res) => {
           return res.status(409).json({ success: false, message: "Phone already in use." });
         }
       }
-
       // 🔐 Handle password update
       let passwordHash = existingSuperAdmin.passwordHash;
       if (password && password.trim().length > 0) {
