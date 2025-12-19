@@ -9,12 +9,14 @@ import {
   logLeadWhatsappShare,
   updateLead,
   checkExistingLead,
+  downloadLeadPDF,
 } from "../Controller/leadController.js";   
 import { authenticate } from "../Middleware/authentication.js";
 
 const router = express.Router();
 
 router.post("/addlead",addLead);
+router.get("/:id/pdf", downloadLeadPDF);
 router.get("/getlead",getAllLeads);
 router.get("/:id",getLeadById);
 router.delete("/:id", deleteLead);

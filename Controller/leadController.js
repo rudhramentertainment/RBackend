@@ -7,6 +7,9 @@ import { sendLeadEmail } from '../utils/emailService.js';
 import {
   notifyAllUsersLeadConverted
 } from "../service/notification.service.js";
+import { generateLeadPDF } from "../utils/pdfGenerator.js";
+import fs from "fs";
+import path from "path";
 
 // 🟢 Add Lead
 // Replace your current addLead function with the following.
@@ -217,6 +220,42 @@ export const addLead = async (req, res) => {
     return res.status(500).json({ success: false, message: "Server error while adding/updating lead.", error: error.message });
   }
 };
+
+export const downloadLeadPDF = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Lead id is required",
+      });
+    }
+
+    const lead = await Lead.findById(id).lean();
+    if (!lead) {
+      return res.status(404).json({
+        success: false,
+        message: "Lead not found",
+      });
+    }
+
+    // 🔥 Load sub-companies (DB or constant)
+    const subCompanies = await SubCompany.find().lean();
+    // OR if static:
+    // const subCompanies = SUBCOMPANIES;
+
+    // ✅ STREAM PDF
+    generateLeadPDF(lead, subCompanies, res);
+  } catch (error) {
+    console.error("PDF download error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate lead PDF",
+    });
+  }
+};
+
 
 
 // Add this route to check for existing leads
