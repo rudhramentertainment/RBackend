@@ -73,3 +73,4 @@ export async function generateAndSaveEmployeeQr(user, { content = null, uploadsD
   const relativePath = `/${uploadsDir}/${filename}`; // e.g. /uploads/qrcodes/...
   return relativePath;
 }
+ 

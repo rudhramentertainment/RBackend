@@ -13,6 +13,12 @@ const InvoiceSchema = new mongoose.Schema({
   invoiceNo: { type: String, required: true, unique: true },
   client: { type: mongoose.Schema.Types.ObjectId, ref: "Client", required: true },
   subCompany: { type: mongoose.Schema.Types.ObjectId, ref: "SubCompany", required: true },
+
+   clientName: { type: String },     // Client name at invoice time
+    gstNumber: { type: String },      // GST number
+    address: { type: String },        // Address
+    city: { type: String },           // City
+    state: { type: String },          // State
   services: [InvoiceServiceSchema],
 
   subtotal: { type: Number, required: true },

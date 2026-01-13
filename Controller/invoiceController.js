@@ -108,6 +108,12 @@ export const generateInvoicePDF = async (req, res) => {
       dueDate,
       notes = "",
       includeGst = true,
+      // ✅ MANUALLY ENTERED FIELDS BY ADMIN
+      clientName,
+      clientGstNumber,
+      clientAddress,
+      clientCity,
+      clientState,
     } = req.body;
 
     // === Lookup client (ObjectId or business code) ===
@@ -327,11 +333,13 @@ export const generateInvoicePDF = async (req, res) => {
       <div class="bill">
         <div><strong>To,</strong></div>
         <div style="margin-top:6px;line-height:1.3">
-          ${escapeHtml(client.name || "")}<br/>
+         ${escapeHtml(clientName || "N/A")}<br/>
           ${escapeHtml(client.businessName || "")}<br/>
           ${escapeHtml(client.email || "")}<br/>
           ${escapeHtml(client.phone || "")}<br/>
-          ${escapeHtml(client.address || "")}
+          ${escapeHtml(clientAddress || "-")}<br/>
+          ${escapeHtml(clientCity || "")}${clientState ? ", " + escapeHtml(clientState) : ""}<br/>
+          GST No: ${escapeHtml(clientGstNumber || "-")}<br/>
         </div>
       </div>
 
@@ -548,6 +556,7 @@ export const generateInvoicePDF = async (req, res) => {
       .json({ success: false, message: err.message || "Server error" });
   }
 };
+
 export const getAllInvoices = async (req, res) => {
   try {
     const invoices = await Invoice.find()
