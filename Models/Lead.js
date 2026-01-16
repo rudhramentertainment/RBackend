@@ -59,19 +59,26 @@ const leadSchema = new mongoose.Schema(
 // 📌 Helper: Generate next token
 leadSchema.statics.generateToken = async function () {
   const currentYear = new Date().getFullYear();
-  const lastLead = await this.findOne().sort({ createdAt: -1 }).exec();
+
+  // ✅ last lead globally (no year filtering)
+  const lastLead = await this.findOne({ token: /^RE-\d{4}-\d+$/ })
+    .sort({ createdAt: -1 })
+    .select("token")
+    .lean();
 
   let nextNumber = 1;
-  if (lastLead && lastLead.token) {
+
+  if (lastLead?.token) {
     const match = lastLead.token.match(/RE-(\d{4})-(\d+)/);
-    if (match && parseInt(match[1]) === currentYear) {
-      nextNumber = parseInt(match[2]) + 1;
+    if (match) {
+      nextNumber = parseInt(match[2]) + 1; // ✅ always increment
     }
   }
 
   const paddedNumber = String(nextNumber).padStart(3, "0");
   return `RE-${currentYear}-${paddedNumber}`;
 };
+
 
 const Lead = mongoose.model("Lead", leadSchema);
 export default Lead;
